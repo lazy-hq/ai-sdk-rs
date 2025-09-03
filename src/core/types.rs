@@ -1,9 +1,11 @@
 //! Core types for AI SDK functions.
 
 use derive_builder::Builder;
+use futures::Stream;
 use serde::{Deserialize, Serialize};
+use std::pin::Pin;
 
-use crate::error::Error;
+use crate::error::{Error, Result};
 
 /// Options for a `generate_text` call.
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
@@ -32,6 +34,10 @@ impl GenerateTextResponse {
     pub fn new(text: impl Into<String>) -> Self {
         Self { text: text.into() }
     }
+}
+
+pub struct GenerateStreamResponse {
+    pub stream: LanguageModelStreamingResponse,
 }
 
 /// Options for a language model request.
@@ -68,3 +74,9 @@ impl LanguageModelResponse {
         }
     }
 }
+
+pub type LanguageModelResponseChunk = LanguageModelResponse; // change this anytime chunk data
+// deviates from text responses
+
+pub type LanguageModelStreamingResponse =
+    Pin<Box<dyn Stream<Item = Result<LanguageModelResponse>>>>;

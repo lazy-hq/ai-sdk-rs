@@ -5,7 +5,9 @@
 //! underlying implementation details of different AI providers, offering a
 //! unified interface for various operations like text generation or streaming.
 
-use crate::core::types::{LanguageModelCallOptions, LanguageModelResponse};
+use crate::core::types::{
+    LanguageModelCallOptions, LanguageModelResponse, LanguageModelStreamingResponse,
+};
 use crate::error::Result;
 use async_trait::async_trait;
 
@@ -39,4 +41,9 @@ pub trait LanguageModel: Send + Sync + std::fmt::Debug {
         &mut self,
         options: LanguageModelCallOptions,
     ) -> Result<LanguageModelResponse>;
+
+    async fn generate_stream(
+        &mut self,
+        options: LanguageModelCallOptions,
+    ) -> Result<LanguageModelStreamingResponse>;
 }

@@ -9,6 +9,7 @@ use async_openai::types::{
     CreateChatCompletionRequestArgs,
 };
 use async_openai::{Client, config::OpenAIConfig};
+use futures::{Stream, StreamExt};
 pub use settings::OpenAIProviderSettings;
 
 //use self::client::{ChatCompletionRequest, Message};
@@ -16,9 +17,9 @@ use crate::{
     core::{
         language_model::LanguageModel,
         provider::Provider,
-        types::{LanguageModelCallOptions, LanguageModelResponse},
+        types::{LanguageModelCallOptions, LanguageModelResponse, LanguageModelStreamingResponse},
     },
-    error::Result,
+    error::{Error, Result},
 };
 use async_trait::async_trait;
 use serde::Serialize;
@@ -99,5 +100,39 @@ impl LanguageModel for OpenAI {
             model: Some(response.model),
             text: text.to_string(),
         })
+    }
+
+    async fn generate_stream(
+        &mut self,
+        options: LanguageModelCallOptions,
+    ) -> Result<LanguageModelStreamingResponse> {
+        let openai_msg: ChatCompletionRequestMessage =
+            OpenAiMessage(OpenAI::user_message(&options.prompt)).0;
+        let request = CreateChatCompletionRequestArgs::default()
+            .model(self.model_name().to_string())
+            .stream(true)
+            .messages(vec![openai_msg])
+            .build()?;
+
+        let response = self.client.chat().create_stream(request).await?;
+
+        let r = response
+            .map(|res| {
+                Ok(LanguageModelResponse::new(
+                    res?.choices
+                        .first()
+                        .ok_or::<async_openai::error::OpenAIError>(
+                            async_openai::error::OpenAIError::StreamError(
+                                "Stream chunk has no content".to_string(),
+                            ),
+                        )?
+                        .delta
+                        .content
+                        .clone()
+                        .unwrap_or("".to_string()),
+                ))
+            })
+            .boxed();
+        Ok(r)
     }
 }
