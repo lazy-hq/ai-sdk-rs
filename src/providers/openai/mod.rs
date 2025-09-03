@@ -9,7 +9,7 @@ use async_openai::types::{
     CreateChatCompletionRequestArgs,
 };
 use async_openai::{Client, config::OpenAIConfig};
-use futures::{Stream, StreamExt};
+use futures::StreamExt;
 pub use settings::OpenAIProviderSettings;
 
 //use self::client::{ChatCompletionRequest, Message};
@@ -19,7 +19,7 @@ use crate::{
         provider::Provider,
         types::{LanguageModelCallOptions, LanguageModelResponse, LanguageModelStreamingResponse},
     },
-    error::{Error, Result},
+    error::Result,
 };
 use async_trait::async_trait;
 use serde::Serialize;
