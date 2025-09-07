@@ -43,7 +43,7 @@ pub trait LanguageModel: Send + Sync + std::fmt::Debug {
     ) -> Result<LanguageModelResponse>;
 
     /// Performs a streaming text generation request.
-    /// 
+    ///
     /// This method sends a prompt to the model and returns a stream of responses.
     ///
     /// # Errors
