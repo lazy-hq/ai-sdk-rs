@@ -34,6 +34,9 @@ pub enum Error {
     #[error("HTTP request error: {0}")]
     ReqwestError(#[from] reqwest::Error),
 
+    #[error("OpenAI error: {0}")]
+    OpenAIError(#[from] async_openai::error::OpenAIError),
+
     /// A catch-all for other miscellaneous errors.
     #[error("AI SDK error: {0}")]
     Other(String),

@@ -30,7 +30,7 @@ use crate::{
 ///
 /// Returns an `Error` if the underlying model fails to generate a response.
 pub async fn generate_text(
-    model: impl LanguageModel,
+    mut model: impl LanguageModel,
     options: GenerateTextCallOptions,
 ) -> Result<GenerateTextResponse> {
     let response = model
