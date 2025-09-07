@@ -8,8 +8,8 @@ use std::pin::Pin;
 use crate::error::{Error, Result};
 
 /// Shortens the definition of the `GenerateTextCallOptions` and
-/// `LanguageModelCallOptions` because all the fields from
-/// `LanguageModelCallOptions` are also in `GenerateTextCallOptions`.
+/// `LanguageModelCallOptions` because all the fields from the first are also
+/// second.
 macro_rules! define_with_lm_call_options {
         ( $( ($field:ident, $typ:ty, $default:expr, $comment:expr) ),* ) => {
             #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
@@ -38,7 +38,6 @@ macro_rules! define_with_lm_call_options {
                     pub $field: $typ,
                 )*
             }
-
         };
 }
 

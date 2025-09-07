@@ -4,15 +4,14 @@
 pub mod settings;
 
 use async_openai::types::{
-    ChatCompletionRequestMessage, ChatCompletionRequestUserMessage,
-    ChatCompletionRequestUserMessageContent, ChatCompletionRequestUserMessageContentPart,
-    CreateChatCompletionRequestArgs,
+    ChatCompletionRequestMessage, ChatCompletionRequestSystemMessage,
+    ChatCompletionRequestUserMessage, ChatCompletionRequestUserMessageContent,
+    ChatCompletionRequestUserMessageContentPart, CreateChatCompletionRequestArgs,
 };
 use async_openai::{Client, config::OpenAIConfig};
 use futures::StreamExt;
 pub use settings::OpenAIProviderSettings;
 
-//use self::client::{ChatCompletionRequest, Message};
 use crate::{
     core::{
         language_model::LanguageModel,
@@ -44,6 +43,10 @@ impl OpenAI {
     fn user_message(message: &str) -> ChatCompletionRequestMessage {
         ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage::from(message))
     }
+
+    fn system_message(message: &str) -> ChatCompletionRequestMessage {
+        ChatCompletionRequestMessage::System(ChatCompletionRequestSystemMessage::from(message))
+    }
 }
 
 struct OpenAiMessage(ChatCompletionRequestMessage);
@@ -67,6 +70,44 @@ impl From<OpenAiMessage> for String {
     }
 }
 
+impl From<LanguageModelCallOptions> for CreateChatCompletionRequestArgs {
+    fn from(options: LanguageModelCallOptions) -> Self {
+        let mut request_builder = CreateChatCompletionRequestArgs::default();
+        //request_builder.model(self.model_name().to_string());
+
+        if let Some(max_tokens) = options.max_tokens {
+            request_builder.max_tokens(max_tokens);
+        };
+
+        if let Some(temprature) = options.temprature {
+            request_builder.temperature(temprature as f32 / 100 as f32);
+        };
+
+        if let Some(top_p) = options.top_p {
+            request_builder.top_p(top_p as f32 / 100 as f32);
+        };
+
+        if let Some(_) = options.top_k {
+            log::warn!("WrongProviderInput: top_k is not supported by OpenAI");
+        };
+
+        if let Some(stop) = options.stop {
+            request_builder.stop(stop);
+        };
+
+        let msg: ChatCompletionRequestMessage =
+            OpenAiMessage(OpenAI::user_message(&options.prompt)).0;
+        let mut msgs = vec![msg];
+
+        if let Some(system_prompt) = options.system_prompt {
+            msgs.push(OpenAI::system_message(&system_prompt));
+        }
+        request_builder.messages(msgs);
+
+        request_builder
+    }
+}
+
 impl Provider for OpenAI {}
 
 #[async_trait]
@@ -83,14 +124,10 @@ impl LanguageModel for OpenAI {
         &mut self,
         options: LanguageModelCallOptions,
     ) -> Result<LanguageModelResponse> {
-        let openai_msg: ChatCompletionRequestMessage =
-            OpenAiMessage(OpenAI::user_message(&options.prompt)).0;
-        let request = CreateChatCompletionRequestArgs::default()
-            .model(self.model_name().to_string())
-            .messages(vec![openai_msg])
-            .build()?;
+        let mut request_builder: CreateChatCompletionRequestArgs = From::from(options);
+        request_builder.model(self.model_name());
 
-        let response = self.client.chat().create(request).await?;
+        let response = self.client.chat().create(request_builder.build()?).await?;
         let text = match response.choices.first() {
             Some(choice) => &choice.message.content.clone().expect("no content"),
             None => "",
@@ -106,16 +143,15 @@ impl LanguageModel for OpenAI {
         &mut self,
         options: LanguageModelCallOptions,
     ) -> Result<LanguageModelStreamingResponse> {
-        let openai_msg: ChatCompletionRequestMessage =
-            OpenAiMessage(OpenAI::user_message(&options.prompt)).0;
-        let request = CreateChatCompletionRequestArgs::default()
-            .model(self.model_name().to_string())
-            .stream(true)
-            .messages(vec![openai_msg])
-            .build()?;
+        let mut request_builder: CreateChatCompletionRequestArgs = From::from(options);
+        request_builder.model(self.model_name());
+        request_builder.stream(true);
 
-        let response = self.client.chat().create_stream(request).await?;
-
+        let response = self
+            .client
+            .chat()
+            .create_stream(request_builder.build()?)
+            .await?;
         let r = response
             .map(|res| {
                 Ok(LanguageModelResponse::new(
