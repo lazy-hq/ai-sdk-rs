@@ -1,5 +1,5 @@
 [package]
-name = "ai-sdk-rs"
+name = "aisdk"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
@@ -7,7 +7,7 @@ description = "An open-source Rust library for building AI-powered applications,
 homepage = "https://github.com/lazy-hq/ai-sdk-rs"
 repository = "https://github.com/lazy-hq/ai-sdk-rs"
 readme = "README.md"
-keywords = ["ai", "sdk", "ai-sdk-rs", "ai-sdk", "language-model", "openai"]
+keywords = ["ai", "sdk", "aisdk", "ai-sdk-rs", "openai"]
 categories = ["api-bindings", "asynchronous"]
 
 [features]

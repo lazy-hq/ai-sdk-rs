@@ -1,4 +1,4 @@
-# AI-SDK-RS
+# AISDK
 
 [![Build Status](https://github.com/lazy-hq/ai-sdk-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/lazy-hq/ai-sdk-rs/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -18,17 +18,17 @@ An open-source Rust library for building AI-powered applications, inspired by th
 
 ## Installation
 
-Add `ai-sdk-rs` to your `Cargo.toml`:
+Add `aisdk` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ai-sdk-rs = "0.1.0"
+aisdk = "0.1.0"
 ```
 
 Enable the OpenAI feature:
 
 ```toml
-ai-sdk-rs = { version = "0.1.0", features = ["openai"] }
+aisdk = { version = "0.1.0", features = ["openai"] }
 ```
 
 ## Usage
