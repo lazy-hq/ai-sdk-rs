@@ -36,7 +36,9 @@ impl GenerateTextResponse {
     }
 }
 
+/// Response from a `generate_stream` call.
 pub struct GenerateStreamResponse {
+    /// A stream of responses from the language model.
     pub stream: LanguageModelStreamingResponse,
 }
 
@@ -75,8 +77,11 @@ impl LanguageModelResponse {
     }
 }
 
+/// Chunked response from a language model.
 pub type LanguageModelResponseChunk = LanguageModelResponse; // change this anytime chunk data
 // deviates from text responses
 
+/// Stream of responses from a language model's streaming API mapped to a common
+/// interface.
 pub type LanguageModelStreamingResponse =
     Pin<Box<dyn Stream<Item = Result<LanguageModelResponse>>>>;
