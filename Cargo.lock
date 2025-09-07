@@ -27,7 +27,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "ai-sdk-rs"
+name = "aisdk"
 version = "0.1.0"
 dependencies = [
  "async-openai",

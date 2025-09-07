@@ -1,5 +1,5 @@
 //! File based prompt templates that use the `tera` template engine. the module
-//! searches for prompt templates in the `./prompts` directory relative to top level.
+//! searches for prompt templates in the `examples/prompts` directory relative to top level.
 //! directory of the project or a directory provided by the user through an environment
 //! variable. provides tools
 //!     - load prompts from a directory
@@ -37,7 +37,7 @@ impl PromptEnvironment {
     /// Creates a new `PromptEnvironment` by discovering templates in the default directory,
     /// which is determined by the `PROMPT_DIR` environment variable or defaults to `./prompts`.
     pub fn new() -> Self {
-        let prompt_dir = env::var("PROMPT_DIR").unwrap_or_else(|_| "./prompts".to_string());
+        let prompt_dir = env::var("PROMPT_DIR").unwrap_or_else(|_| "examples/prompts".to_string());
         Self::from_directory(&prompt_dir)
     }
 
