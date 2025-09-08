@@ -1,6 +1,6 @@
 //! Integration tests for the OpenAI provider.
 
-use ai_sdk_rs::{
+use aisdk::{
     core::{GenerateTextCallOptions, generate_stream, generate_text},
     providers::openai::{OpenAI, OpenAIProviderSettings},
 };

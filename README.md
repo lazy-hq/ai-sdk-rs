@@ -36,7 +36,7 @@ aisdk = { version = "0.1.0", features = ["openai"] }
 ### Basic Text Generation
 
 ```rust
-use ai_sdk_rs::{
+use aisdk::{
     core::{GenerateTextCallOptions, generate_text},
     providers::openai::{OpenAI, OpenAIProviderSettings},
 };
@@ -63,7 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### Streaming Text Generation
 
 ```rust
-use ai_sdk_rs::{
+use aisdk::{
     core::{GenerateTextCallOptions, generate_stream},
     providers::openai::{OpenAI, OpenAIProviderSettings},
 };
