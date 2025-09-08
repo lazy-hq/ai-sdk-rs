@@ -80,14 +80,14 @@ impl From<LanguageModelCallOptions> for CreateChatCompletionRequestArgs {
         };
 
         if let Some(temprature) = options.temprature {
-            request_builder.temperature(temprature as f32 / 100 as f32);
+            request_builder.temperature(temprature as f32 / 100_f32);
         };
 
         if let Some(top_p) = options.top_p {
-            request_builder.top_p(top_p as f32 / 100 as f32);
+            request_builder.top_p(top_p as f32 / 100_f32);
         };
 
-        if let Some(_) = options.top_k {
+        if options.top_k.is_some() {
             log::warn!("WrongProviderInput: top_k is not supported by OpenAI");
         };
 
