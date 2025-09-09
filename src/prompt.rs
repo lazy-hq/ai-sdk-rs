@@ -10,7 +10,7 @@
 //! # Examples
 //!
 //! ```rust
-//! // use ai_sdk_rs::prompt::Prompt;
+//! // use aisdk::prompt::Prompt;
 //!
 //! // Prompt::new("system/base")  // loads from ./prompts/system/base.prompt
 //! //    .with_extension("txt") // optionally override the extension

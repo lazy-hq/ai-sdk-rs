@@ -3,7 +3,7 @@
 //! # Examples
 //!
 //! ```
-//! use ai_sdk_rs::error::{Result, Error};
+//! use aisdk::error::{Result, Error};
 //!
 //! fn might_fail(should_fail: bool) -> Result<()> {
 //!     if should_fail {

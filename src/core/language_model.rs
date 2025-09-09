@@ -42,6 +42,13 @@ pub trait LanguageModel: Send + Sync + std::fmt::Debug {
         options: LanguageModelCallOptions,
     ) -> Result<LanguageModelResponse>;
 
+    /// Performs a streaming text generation request.
+    ///
+    /// This method sends a prompt to the model and returns a stream of responses.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Error` if the API call fails or the request is invalid.
     async fn generate_stream(
         &mut self,
         options: LanguageModelCallOptions,

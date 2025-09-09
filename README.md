@@ -36,7 +36,7 @@ aisdk = { version = "0.1.0", features = ["openai"] }
 ### Basic Text Generation
 
 ```rust
-use ai_sdk_rs::{
+use aisdk::{
     core::{GenerateTextCallOptions, generate_text},
     providers::openai::{OpenAI, OpenAIProviderSettings},
 };
@@ -63,7 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### Streaming Text Generation
 
 ```rust
-use ai_sdk_rs::{
+use aisdk::{
     core::{GenerateTextCallOptions, generate_stream},
     providers::openai::{OpenAI, OpenAIProviderSettings},
 };
@@ -89,6 +89,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+
+
+### Providers
+
+- **Yes**: ✅
+- **NA**: Not Applicable
+
+| Model/Input     | Max Tokens      | Temprature      | Top P           | Top K           | Stop            |
+| --------------- | --------------- | --------------- | --------------- | --------------- | --------------- |
+| OpenAi          | ✅              | ✅              | ✅              | NA              | ✅              |
+
+
+### Prompts
+The file in `./prompts` contains various example prompt files to demonstrate the capabilities of the `aisdk` prompt templating system, powered by the `tera` engine. These examples showcase different features like variable substitution, conditionals, loops, and template inclusion, simulating common AI prompt constructions.
 
 ## Technologies Used
 

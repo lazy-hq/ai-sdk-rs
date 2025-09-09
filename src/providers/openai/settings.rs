@@ -21,10 +21,6 @@ pub struct OpenAIProviderSettings {
     /// The name of the provider.
     #[builder(default = "\"openai\".to_string()")]
     pub provider_name: String,
-
-    /// The maximum number of tokens to generate.
-    #[builder(default = "100")]
-    pub max_tokens: u32,
 }
 
 impl OpenAIProviderSettings {

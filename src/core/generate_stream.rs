@@ -1,3 +1,5 @@
+//! Provides the primary user-facing function for text stream generation.
+
 use crate::{
     core::{
         language_model::LanguageModel,
