@@ -94,15 +94,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Providers
 
+- **Yes**: ✅
+- **NA**: Not Applicable
+
 | Model/Input     | Max Tokens      | Temprature      | Top P           | Top K           | Stop            |
 | --------------- | --------------- | --------------- | --------------- | --------------- | --------------- |
 | OpenAi          | ✅              | ✅              | ✅              | NA              | ✅              |
 
-- **Yes**: ✅ 
-- **NA**: Not Applicable
 
 ### Prompts
-The directory `./prompts` contains various example prompt files to demonstrate the capabilities of the `ai-sdk-rs` prompt templating system, powered by the `tera` engine. These examples showcase different features like variable substitution, conditionals, loops, and template inclusion, simulating common AI prompt constructions.
+The file in `./prompts` contains various example prompt files to demonstrate the capabilities of the `aisdk` prompt templating system, powered by the `tera` engine. These examples showcase different features like variable substitution, conditionals, loops, and template inclusion, simulating common AI prompt constructions.
 
 ## Technologies Used
 

@@ -129,7 +129,6 @@ impl LanguageModelResponse {
 
 /// Chunked response from a language model.
 pub type LanguageModelResponseChunk = LanguageModelResponse; // change this anytime chunk data
-// deviates from text responses
 
 /// Stream of responses from a language model's streaming API mapped to a common
 /// interface.

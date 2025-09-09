@@ -1,9 +1,4 @@
-//! Provides the primary user-facing function for text stream generation. See
-//! [crate::core::generate_text]
-//!
-//! This module contains the `generate_stream` function, which helps generate
-//! text in a streaming manner using any model that implements the
-//! `LanguageModel` trait.
+//! Provides the primary user-facing function for text stream generation.
 
 use crate::{
     core::{
