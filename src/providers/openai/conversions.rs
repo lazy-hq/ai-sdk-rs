@@ -1,76 +1,56 @@
 //! Helper functions and conversions for the OpenAI provider.
 
-use async_openai::types::{
-    ChatCompletionRequestMessage, ChatCompletionRequestSystemMessage,
-    ChatCompletionRequestUserMessage, ChatCompletionRequestUserMessageContent,
-    ChatCompletionRequestUserMessageContentPart, CreateChatCompletionRequestArgs,
+use async_openai::types::responses::{
+    CreateResponse, Input, InputContent, InputItem, InputMessage, InputMessageType, Role,
 };
 
-use crate::core::types::LanguageModelCallOptions;
+use crate::core::types::{LanguageModelCallOptions, ModelMessage};
 
-fn user_message(message: &str) -> ChatCompletionRequestMessage {
-    ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage::from(message))
-}
+impl From<LanguageModelCallOptions> for CreateResponse {
+    fn from(options: LanguageModelCallOptions) -> Self {
+        let mut items: Vec<InputItem> = options
+            .messages
+            .unwrap_or_default()
+            .into_iter()
+            .map(|m| InputItem::Message(m.into()))
+            .collect();
 
-fn system_message(message: &str) -> ChatCompletionRequestMessage {
-    ChatCompletionRequestMessage::System(ChatCompletionRequestSystemMessage::from(message))
-}
+        // system prompt first since openai likes it at the top
+        if let Some(system) = options.system {
+            items.insert(
+                0,
+                InputItem::Message(InputMessage {
+                    role: Role::System,
+                    kind: InputMessageType::default(),
+                    content: InputContent::TextInput(system),
+                }),
+            );
+        }
 
-struct OpenAiMessage(ChatCompletionRequestMessage);
-
-impl From<OpenAiMessage> for String {
-    /// Handle the conversion from any `OpenAiMessage` to `String`. Currently it only handles
-    /// user messages that are texts or part of a text. returns empty string if it is not.
-    fn from(value: OpenAiMessage) -> Self {
-        match value.0 {
-            ChatCompletionRequestMessage::User(user_message) => match &user_message.content {
-                ChatCompletionRequestUserMessageContent::Text(text) => text.to_string(),
-                ChatCompletionRequestUserMessageContent::Array(arr) => match arr.first().unwrap() {
-                    ChatCompletionRequestUserMessageContentPart::Text(text) => {
-                        text.text.to_string()
-                    }
-                    _ => "".to_string(),
-                },
-            },
-            _ => "".to_string(),
+        CreateResponse {
+            input: Input::Items(items),
+            model: options.model,
+            temperature: options.temperature.map(|t| t as f32 / 100.0),
+            max_output_tokens: options.max_tokens,
+            stream: Some(false),
+            top_p: options.top_p.map(|t| t as f32 / 100.0),
+            ..Default::default()
+            // TODO: add support for other options
         }
     }
 }
 
-impl From<LanguageModelCallOptions> for CreateChatCompletionRequestArgs {
-    fn from(options: LanguageModelCallOptions) -> Self {
-        let mut request_builder = CreateChatCompletionRequestArgs::default();
-        //request_builder.model(self.model_name().to_string());
-
-        if let Some(max_tokens) = options.max_tokens {
-            request_builder.max_tokens(max_tokens);
+impl From<ModelMessage> for InputMessage {
+    fn from(m: ModelMessage) -> Self {
+        let (role, text) = match m {
+            ModelMessage::System(s) => (Role::System, s.content),
+            ModelMessage::User(u) => (Role::User, u.content),
+            ModelMessage::Assistant(a) => (Role::Assistant, a.content),
         };
-
-        if let Some(temprature) = options.temprature {
-            request_builder.temperature(temprature as f32 / 100_f32);
-        };
-
-        if let Some(top_p) = options.top_p {
-            request_builder.top_p(top_p as f32 / 100_f32);
-        };
-
-        if options.top_k.is_some() {
-            log::warn!("WrongProviderInput: top_k is not supported by OpenAI");
-        };
-
-        if let Some(stop) = options.stop {
-            request_builder.stop(stop);
-        };
-
-        let msg: ChatCompletionRequestMessage =
-            OpenAiMessage(user_message(&options.prompt)).0;
-        let mut msgs = vec![msg];
-
-        if let Some(system_prompt) = options.system_prompt {
-            msgs.push(system_message(&system_prompt));
+        InputMessage {
+            role,
+            kind: InputMessageType::default(),
+            content: InputContent::TextInput(text),
         }
-        request_builder.messages(msgs);
-
-        request_builder
     }
 }

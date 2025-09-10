@@ -110,6 +110,7 @@ macro_rules! define_with_lm_call_options {
         };
 }
 
+// TODO: add support for main options
 define_with_lm_call_options!(
     // identifier, type, default, comment
     (
