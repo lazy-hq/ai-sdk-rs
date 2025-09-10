@@ -37,6 +37,10 @@ pub enum Error {
     #[error("OpenAI error: {0}")]
     OpenAIError(#[from] async_openai::error::OpenAIError),
 
+    /// An error for invalid input.
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
+
     /// A catch-all for other miscellaneous errors.
     #[error("AI SDK error: {0}")]
     Other(String),

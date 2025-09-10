@@ -8,16 +8,15 @@ use crate::{
     core::{
         language_model::LanguageModel,
         types::{GenerateTextCallOptions, GenerateTextResponse, LanguageModelCallOptions},
+        utils::resolve_message,
     },
     error::Result,
 };
 
 /// Generates text using a specified language model.
 ///
-/// This function orchestrates the text generation process by taking a configured
-/// set of options, invoking the `generate` method on the provided language model,
-/// and returning a standardized response.
-///
+/// Generate a text and call tools for a given prompt using a language model.
+/// This function does not stream the output. If you want to stream the output, use `generate_stream` instead.
 ///
 /// # Arguments
 ///
@@ -33,10 +32,19 @@ pub async fn generate_text(
     mut model: impl LanguageModel,
     options: GenerateTextCallOptions,
 ) -> Result<GenerateTextResponse> {
+    let (system_prompt, messages) =
+        resolve_message(options.system, options.prompt, options.messages);
+
     let response = model
         .generate(
             LanguageModelCallOptions::builder()
-                .prompt(options.prompt)
+                .system(system_prompt)
+                .messages(messages)
+                .max_tokens(options.max_tokens)
+                .temprature(options.temprature)
+                .top_p(options.top_p)
+                .top_k(options.top_k)
+                .stop(options.stop)
                 .build()?,
         )
         .await?;
