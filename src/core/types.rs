@@ -200,6 +200,9 @@ pub struct LanguageModelResponse {
 
     /// The model that generated the response.
     pub model: Option<String>,
+
+    /// The reason the model stopped generating text.
+    pub stop_reason: Option<String>,
 }
 
 impl LanguageModelResponse {
@@ -208,6 +211,7 @@ impl LanguageModelResponse {
         Self {
             text: text.into(),
             model: None,
+            stop_reason: None,
         }
     }
 }

@@ -70,6 +70,7 @@ impl LanguageModel for OpenAI {
         Ok(LanguageModelResponse {
             model: Some(response.model.to_string()),
             text,
+            stop_reason: None,
         })
     }
 
@@ -82,19 +83,64 @@ impl LanguageModel for OpenAI {
         request.stream = Some(true);
 
         let openai_stream: ResponseStream = self.client.responses().create_stream(request).await?;
-        let lang_stream = openai_stream.map(|evt_res| {
-            evt_res.map_err(|e| e.into()).map(|evt| match evt {
-                ResponseEvent::ResponseOutputTextDelta(delta) => LanguageModelResponse {
-                    text: delta.delta,
+
+        #[derive(Default)]
+        struct StreamState {
+            stop_reason: Option<String>,
+            completed: bool,
+        }
+
+        let stream = openai_stream.scan(StreamState::default(), |state, evt_res| {
+            // If already completed, don't emit anything more
+            if state.completed {
+                return futures::future::ready(None);
+            }
+
+            futures::future::ready(match evt_res {
+                Ok(ResponseEvent::ResponseOutputTextDelta(d)) => Some(Ok(LanguageModelResponse {
+                    text: d.delta,
                     model: None,
-                },
-                _ => LanguageModelResponse {
+                    stop_reason: None,
+                })),
+                Ok(ResponseEvent::ResponseCompleted(_)) => {
+                    state.stop_reason = Some("completed".into());
+                    state.completed = true;
+                    Some(Ok(LanguageModelResponse {
+                        text: String::new(),
+                        model: None,
+                        stop_reason: Some("completed".into()),
+                    }))
+                }
+                Ok(ResponseEvent::ResponseFailed(f)) => {
+                    let reason = f
+                        .response
+                        .error
+                        .as_ref()
+                        .map(|e| format!("{}: {}", e.code, e.message))
+                        .unwrap_or_else(|| "unknown failure".to_string());
+
+                    state.completed = true;
+                    state.stop_reason = Some(reason);
+
+                    Some(Ok(LanguageModelResponse {
+                        text: String::new(),
+                        model: None,
+                        stop_reason: state.stop_reason.clone(),
+                    }))
+                }
+                // TODO: handle other events
+                Ok(_) => Some(Ok(LanguageModelResponse {
                     text: String::new(),
                     model: None,
-                },
+                    stop_reason: None,
+                })),
+                Err(e) => {
+                    state.completed = true;
+                    Some(Err(e.into()))
+                }
             })
         });
 
-        Ok(Box::pin(lang_stream) as LanguageModelStreamingResponse)
+        Ok(Box::pin(stream) as LanguageModelStreamingResponse)
     }
 }
