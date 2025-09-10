@@ -1,7 +1,10 @@
 //! Integration tests for the OpenAI provider.
 
 use aisdk::{
-    core::{GenerateTextCallOptions, generate_stream, generate_text},
+    core::{
+        AssistantMessage, GenerateTextCallOptions, ModelMessage, SystemMessage, UserMessage,
+        generate_stream, generate_text,
+    },
     providers::openai::{OpenAI, OpenAIProviderSettings},
 };
 use dotenv::dotenv;
@@ -82,4 +85,154 @@ async fn test_generate_stream_with_openai() {
         }
     }
     assert!(buf.contains("hello"));
+}
+
+#[tokio::test]
+async fn test_generate_text_with_system_prompt() {
+    dotenv().ok();
+
+    // This test requires a valid OpenAI API key to be set in the environment.
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        println!("Skipping test: OPENAI_API_KEY not set");
+        return;
+    }
+
+    let settings = OpenAIProviderSettings::builder()
+        .api_key(std::env::var("OPENAI_API_KEY").unwrap())
+        .model_name("gpt-4o".to_string())
+        .build()
+        .expect("Failed to build OpenAIProviderSettings");
+
+    let openai = OpenAI::new(settings);
+
+    let options = GenerateTextCallOptions::builder()
+        .system(Some(
+            "Only say hello whatever the user says. \n 
+            all lowercase no punctuation, prefixes, or suffixes."
+            .to_string(),
+        ))
+        .prompt(Some("Hello how are you doing?".to_string()))
+        .build()
+        .expect("Failed to build GenerateTextCallOptions");
+
+    let result = generate_text(openai, options).await;
+    assert!(result.is_ok());
+
+    let text = result.as_ref().expect("Failed to get result").text.trim();
+    assert!(text.contains("hello"));
+}
+
+#[tokio::test]
+async fn test_generate_text_with_messages() {
+    dotenv().ok();
+
+    // This test requires a valid OpenAI API key to be set in the environment.
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        println!("Skipping test: OPENAI_API_KEY not set");
+        return;
+    }
+
+    let settings = OpenAIProviderSettings::builder()
+        .api_key(std::env::var("OPENAI_API_KEY").unwrap())
+        .model_name("gpt-4o".to_string())
+        .build()
+        .expect("Failed to build OpenAIProviderSettings");
+
+    let openai = OpenAI::new(settings);
+
+    let options = GenerateTextCallOptions::builder()
+        .messages(Some(vec![
+            ModelMessage::System(SystemMessage::new(
+                "You are a helpful assistant.".to_string(),
+            )),
+            ModelMessage::User(UserMessage::new("Whatsup?, Surafel is here".to_string())),
+            ModelMessage::Assistant(AssistantMessage::new("How could I help you?".to_string())),
+            ModelMessage::User(UserMessage::new("Could you tell my name?".to_string())),
+        ]))
+        .build()
+        .expect("Failed to build GenerateTextCallOptions");
+
+    let result = generate_text(openai, options).await;
+    assert!(result.is_ok());
+
+    let text = result.as_ref().expect("Failed to get result").text.trim();
+    assert!(text.contains("Surafel"));
+}
+
+#[tokio::test]
+async fn test_generate_text_with_messages_and_system_prompt() {
+    dotenv().ok();
+
+    // This test requires a valid OpenAI API key to be set in the environment.
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        println!("Skipping test: OPENAI_API_KEY not set");
+        return;
+    }
+
+    let settings = OpenAIProviderSettings::builder()
+        .api_key(std::env::var("OPENAI_API_KEY").unwrap())
+        .model_name("gpt-4o".to_string())
+        .build()
+        .expect("Failed to build OpenAIProviderSettings");
+
+    let openai = OpenAI::new(settings);
+
+    let options = GenerateTextCallOptions::builder()
+        .system(Some(
+            "Only say hello whatever the user says. \n
+            all lowercase no punctuation, prefixes, or suffixes."
+            .to_string(),
+        ))
+        .messages(Some(vec![
+            ModelMessage::User(UserMessage::new("Whatsup?, Surafel is here".to_string())),
+            ModelMessage::Assistant(AssistantMessage::new("How could I help you?".to_string())),
+            ModelMessage::User(UserMessage::new("Could you tell my name?".to_string())),
+        ]))
+        .build()
+        .expect("Failed to build GenerateTextCallOptions");
+
+    let result = generate_text(openai, options).await;
+    assert!(result.is_ok());
+
+    let text = result.as_ref().expect("Failed to get result").text.trim();
+    assert!(text.contains("hello"));
+}
+
+#[tokio::test]
+async fn test_generate_text_with_messages_and_inmessage_system_prompt() {
+    dotenv().ok();
+
+    // This test requires a valid OpenAI API key to be set in the environment.
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        println!("Skipping test: OPENAI_API_KEY not set");
+        return;
+    }
+
+    let settings = OpenAIProviderSettings::builder()
+        .api_key(std::env::var("OPENAI_API_KEY").unwrap())
+        .model_name("gpt-4o".to_string())
+        .build()
+        .expect("Failed to build OpenAIProviderSettings");
+
+    let openai = OpenAI::new(settings);
+
+    let options = GenerateTextCallOptions::builder()
+        .messages(Some(vec![
+            ModelMessage::System(SystemMessage::new(
+                "Only say hello whatever the user says. \n
+                all lowercase no punctuation, prefixes, or suffixes."
+                .to_string(),
+            )),
+            ModelMessage::User(UserMessage::new("Whatsup?, Surafel is here".to_string())),
+            ModelMessage::Assistant(AssistantMessage::new("How could I help you?".to_string())),
+            ModelMessage::User(UserMessage::new("Could you tell my name?".to_string())),
+        ]))
+        .build()
+        .expect("Failed to build GenerateTextCallOptions");
+
+    let result = generate_text(openai, options).await;
+    assert!(result.is_ok());
+
+    let text = result.as_ref().expect("Failed to get result").text.trim();
+    assert!(text.contains("hello"));
 }
