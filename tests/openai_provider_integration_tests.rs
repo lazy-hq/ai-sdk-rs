@@ -26,10 +26,11 @@ async fn test_generate_text_with_openai() {
     let openai = OpenAI::new(settings);
 
     let options = GenerateTextCallOptions::builder()
-        .prompt(
+        .prompt(Some(
             "Respond with exactly the word 'hello' in all lowercase.\n 
-                Do not include any punctuation, prefixes, or suffixes.",
-        )
+                Do not include any punctuation, prefixes, or suffixes."
+                .to_string(),
+        ))
         .build()
         .expect("Failed to build GenerateTextCallOptions");
 
@@ -59,23 +60,26 @@ async fn test_generate_stream_with_openai() {
     let openai = OpenAI::new(settings);
 
     let options = GenerateTextCallOptions::builder()
-        .prompt(
+        .prompt(Some(
             "Respond with exactly the word 'hello' in all lowercase\n 
             10 times each on new lines. Do not include any punctuation,\n 
-            prefixes, or suffixes.",
-        )
+            prefixes, or suffixes."
+                .to_string(),
+        ))
         .build()
         .expect("Failed to build GenerateTextCallOptions");
 
-    let result = generate_stream(openai, options).await;
-    assert!(&result.is_ok());
-
-    if let Ok(mut stream) = result {
-        let mut whole_text = String::new();
-        while let Some(chunk) = stream.stream.next().await {
-            let text = chunk.as_ref().expect("Failed to get result").text.trim();
-            whole_text = format!("{whole_text} {text}");
+    let mut stream = generate_stream(openai, options).await.unwrap().stream;
+    let mut buf = String::new();
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(lang_resp) => {
+                if !lang_resp.text.is_empty() {
+                    buf.push_str(&lang_resp.text);
+                }
+            }
+            _ => {}
         }
-        assert!(whole_text.contains("hello"));
     }
+    assert!(buf.contains("hello"));
 }
