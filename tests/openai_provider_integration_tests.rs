@@ -2,10 +2,9 @@
 
 use aisdk::{
     core::{
-        AssistantMessage, GenerateTextCallOptions, ModelMessage, SystemMessage, UserMessage,
-        generate_stream, generate_text,
+        generate_stream, generate_text, AssistantMessage, GenerateTextCallOptions, ModelMessage, SystemMessage, UserMessage
     },
-    providers::openai::{OpenAI, OpenAIProviderSettings},
+    providers::openai::{OpenAI, OpenAIProviderSettings}, Error,
 };
 use dotenv::dotenv;
 use futures::StreamExt;
@@ -235,4 +234,52 @@ async fn test_generate_text_with_messages_and_inmessage_system_prompt() {
 
     let text = result.as_ref().expect("Failed to get result").text.trim();
     assert!(text.contains("hello"));
+}
+
+#[tokio::test]
+async fn test_generate_text_builder_with_both_prompt_and_messages() {
+    dotenv().ok();
+
+    // the builder should fail
+    let options = GenerateTextCallOptions::builder()
+        .prompt(Some(
+            "Only say hello whatever the user says. \n 
+            all lowercase no punctuation, prefixes, or suffixes."
+                .to_string(),
+        ))
+        .messages(Some(vec![ModelMessage::User(UserMessage::new(
+            "Whatsup?, Surafel is here".to_string(),
+        ))]))
+        .build();
+
+    assert!(options.is_err());
+    match options.unwrap_err() {
+        Error::InvalidInput(msg) => {
+            assert!(msg.contains("Cannot set both prompt and messages"));
+        }
+        _ => {
+            panic!("Expected InvalidInput error");
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_generate_text_builder_with_no_prompt_and_messages() {
+    dotenv().ok();
+
+    // the builder should fail
+    let options = GenerateTextCallOptions::builder()
+        .system(Some("You are a helpful assistant.".to_string()))
+        .build();
+
+    assert!(options.is_err());
+
+    match options.unwrap_err() {
+        Error::InvalidInput(msg) => {
+            assert!(msg.contains("Messages or prompt must be set"));
+        }
+        _ => {
+            panic!("Expected InvalidInput error");
+        }
+    }
 }
