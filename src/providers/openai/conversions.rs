@@ -33,8 +33,7 @@ impl From<LanguageModelCallOptions> for CreateResponse {
             max_output_tokens: options.max_tokens,
             stream: Some(false),
             top_p: options.top_p.map(|t| t as f32 / 100.0),
-            ..Default::default()
-            // TODO: add support for other options
+            ..Default::default() // TODO: add support for other options
         }
     }
 }

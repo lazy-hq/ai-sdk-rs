@@ -1,10 +1,12 @@
 //! Integration tests for the OpenAI provider.
 
 use aisdk::{
+    Error,
     core::{
-        generate_stream, generate_text, AssistantMessage, GenerateTextCallOptions, ModelMessage, SystemMessage, UserMessage
+        AssistantMessage, GenerateTextCallOptions, ModelMessage, SystemMessage, UserMessage,
+        generate_stream, generate_text,
     },
-    providers::openai::{OpenAI, OpenAIProviderSettings}, Error,
+    providers::openai::{OpenAI, OpenAIProviderSettings},
 };
 use dotenv::dotenv;
 use futures::StreamExt;
@@ -74,13 +76,10 @@ async fn test_generate_stream_with_openai() {
     let mut stream = generate_stream(openai, options).await.unwrap().stream;
     let mut buf = String::new();
     while let Some(chunk) = stream.next().await {
-        match chunk {
-            Ok(lang_resp) => {
-                if !lang_resp.text.is_empty() {
-                    buf.push_str(&lang_resp.text);
-                }
-            }
-            _ => {}
+        if let Ok(lang_resp) = chunk
+            && !lang_resp.text.is_empty()
+        {
+            buf.push_str(&lang_resp.text);
         }
     }
     assert!(buf.contains("hello"));
@@ -108,7 +107,7 @@ async fn test_generate_text_with_system_prompt() {
         .system(Some(
             "Only say hello whatever the user says. \n 
             all lowercase no punctuation, prefixes, or suffixes."
-            .to_string(),
+                .to_string(),
         ))
         .prompt(Some("Hello how are you doing?".to_string()))
         .build()
@@ -180,7 +179,7 @@ async fn test_generate_text_with_messages_and_system_prompt() {
         .system(Some(
             "Only say hello whatever the user says. \n
             all lowercase no punctuation, prefixes, or suffixes."
-            .to_string(),
+                .to_string(),
         ))
         .messages(Some(vec![
             ModelMessage::User(UserMessage::new("Whatsup?, Surafel is here".to_string())),
@@ -220,7 +219,7 @@ async fn test_generate_text_with_messages_and_inmessage_system_prompt() {
             ModelMessage::System(SystemMessage::new(
                 "Only say hello whatever the user says. \n
                 all lowercase no punctuation, prefixes, or suffixes."
-                .to_string(),
+                    .to_string(),
             )),
             ModelMessage::User(UserMessage::new("Whatsup?, Surafel is here".to_string())),
             ModelMessage::Assistant(AssistantMessage::new("How could I help you?".to_string())),
