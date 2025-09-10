@@ -7,6 +7,43 @@ use std::pin::Pin;
 
 use crate::error::{Error, Result};
 
+/// Role for model messages.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Role {
+    System,
+    User,
+    Assistant,
+}
+
+/// Model message types.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ModelMessage {
+    System(SystemModelMessage),
+    User(UserModelMessage),
+    Assistant(AssistantModelMessage),
+}
+
+/// System model message.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemModelMessage {
+    pub role: Role,
+    pub content: String,
+}
+
+/// User model message.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserModelMessage {
+    pub role: Role,
+    pub content: String,
+}
+
+/// Assistant model message.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssistantModelMessage {
+    pub role: Role,
+    pub content: String,
+}
+
 /// Shortens the definition of the `GenerateTextCallOptions` and
 /// `LanguageModelCallOptions` because all the fields from the first are also
 /// second.
@@ -57,7 +94,7 @@ define_with_lm_call_options!(
     ),
     (
         messages,
-        Option<Vec<String>>,
+        Option<Vec<ModelMessage>>,
         None,
         "The messages to generate text from. uses the chat format. If both prompt and messages are set, prompt will be ignored."
     ),
