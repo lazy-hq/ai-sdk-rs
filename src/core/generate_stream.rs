@@ -35,7 +35,6 @@ pub async fn generate_stream(
     let response = model
         .generate_stream(
             LanguageModelCallOptions::builder()
-                .model(options.model)
                 .system(system_prompt)
                 .messages(messages)
                 .max_tokens(options.max_tokens)

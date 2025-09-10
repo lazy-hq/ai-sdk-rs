@@ -17,6 +17,10 @@ pub struct OpenAIProviderSettings {
     /// The name of the provider.
     #[builder(default = "\"openai\".to_string()")]
     pub provider_name: String,
+
+    /// The name of the model to use.
+    #[builder(default = "\"gpt-4o\".to_string()")]
+    pub model_name: String,
 }
 
 impl OpenAIProviderSettings {

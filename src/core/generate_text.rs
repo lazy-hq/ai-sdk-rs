@@ -38,7 +38,6 @@ pub async fn generate_text(
     let response = model
         .generate(
             LanguageModelCallOptions::builder()
-                .model(options.model)
                 .system(system_prompt)
                 .messages(messages)
                 .max_tokens(options.max_tokens)

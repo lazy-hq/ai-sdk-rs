@@ -29,7 +29,6 @@ impl From<LanguageModelCallOptions> for CreateResponse {
 
         CreateResponse {
             input: Input::Items(items),
-            model: options.model,
             temperature: options.temperature.map(|t| t as f32 / 100.0),
             max_output_tokens: options.max_tokens,
             stream: Some(false),

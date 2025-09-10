@@ -114,12 +114,6 @@ macro_rules! define_with_lm_call_options {
 define_with_lm_call_options!(
     // identifier, type, default, comment
     (
-        model,
-        String,
-        "".to_string(),
-        "The model to use for the request."
-    ),
-    (
         system,
         Option<String>,
         None,

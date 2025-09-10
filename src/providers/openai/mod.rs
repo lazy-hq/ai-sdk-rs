@@ -51,7 +51,9 @@ impl LanguageModel for OpenAI {
         &mut self,
         options: LanguageModelCallOptions,
     ) -> Result<LanguageModelResponse> {
-        let request: CreateResponse = options.into();
+        let mut request: CreateResponse = options.into();
+        request.model = self.settings.model_name.to_string();
+
         let response: Response = self.client.responses().create(request).await?;
         let text = response
             .output
@@ -76,6 +78,7 @@ impl LanguageModel for OpenAI {
         options: LanguageModelCallOptions,
     ) -> Result<LanguageModelStreamingResponse> {
         let mut request: CreateResponse = options.into();
+        request.model = self.settings.model_name.to_string();
         request.stream = Some(true);
 
         let openai_stream: ResponseStream = self.client.responses().create_stream(request).await?;
