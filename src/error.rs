@@ -30,10 +30,6 @@ pub enum Error {
     #[error("API error: {0}")]
     ApiError(String),
 
-    /// An error from the underlying `reqwest` client.
-    #[error("HTTP request error: {0}")]
-    ReqwestError(#[from] reqwest::Error),
-
     #[error("OpenAI error: {0}")]
     OpenAIError(#[from] async_openai::error::OpenAIError),
 
