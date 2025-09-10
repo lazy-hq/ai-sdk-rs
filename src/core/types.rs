@@ -113,6 +113,12 @@ macro_rules! define_with_lm_call_options {
 define_with_lm_call_options!(
     // identifier, type, default, comment
     (
+        model,
+        String,
+        "".to_string(),
+        "The model to use for the request."
+    ),
+    (
         system,
         Option<String>,
         None,
@@ -130,7 +136,7 @@ define_with_lm_call_options!(
         None,
         "The maximum number of tokens to generate."
     ),
-    (temprature, Option<u32>, None, "Randomness."),
+    (temperature, Option<u32>, None, "Randomness."),
     (top_p, Option<u32>, None, "Nucleus sampling."),
     (top_k, Option<u32>, None, "Top-k sampling."),
     (stop, Option<Vec<String>>, None, "Stop sequence.")
