@@ -197,6 +197,7 @@ pub struct GenerateStreamResponse {
     pub stream: LanguageModelStreamingResponse,
 }
 
+// TODO: constract a standard response type
 /// Response from a language model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LanguageModelResponse {
@@ -223,4 +224,4 @@ pub type LanguageModelResponseChunk = LanguageModelResponse; // change this anyt
 /// Stream of responses from a language model's streaming API mapped to a common
 /// interface.
 pub type LanguageModelStreamingResponse =
-    Pin<Box<dyn Stream<Item = Result<LanguageModelResponse>>>>;
+    Pin<Box<dyn Stream<Item = Result<LanguageModelResponse>> + Send>>;

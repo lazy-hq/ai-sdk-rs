@@ -3,7 +3,9 @@
 
 pub mod conversions;
 pub mod settings;
-use async_openai::types::CreateChatCompletionRequestArgs;
+use async_openai::types::responses::{
+    Content, CreateResponse, OutputContent, Response, ResponseEvent, ResponseStream,
+};
 use async_openai::{Client, config::OpenAIConfig};
 use futures::StreamExt;
 pub use settings::OpenAIProviderSettings;
@@ -45,26 +47,27 @@ impl LanguageModel for OpenAI {
         &self.settings.provider_name
     }
 
-    fn model_name(&self) -> &str {
-        &self.settings.model_name
-    }
-
     async fn generate(
         &mut self,
         options: LanguageModelCallOptions,
     ) -> Result<LanguageModelResponse> {
-        let mut request_builder: CreateChatCompletionRequestArgs = From::from(options);
-        request_builder.model(self.model_name());
-
-        let response = self.client.chat().create(request_builder.build()?).await?;
-        let text = match response.choices.first() {
-            Some(choice) => &choice.message.content.clone().expect("no content"),
-            None => "",
-        };
+        let request: CreateResponse = options.into();
+        let response: Response = self.client.responses().create(request).await?;
+        let text = response
+            .output
+            .iter()
+            .find_map(|out| match out {
+                OutputContent::Message(msg) => msg.content.iter().find_map(|c| match c {
+                    Content::OutputText(t) => Some(t.text.to_string()),
+                    _ => None,
+                }),
+                _ => None,
+            })
+            .unwrap_or_default();
 
         Ok(LanguageModelResponse {
-            model: Some(response.model),
-            text: text.to_string(),
+            model: Some(response.model.to_string()),
+            text,
         })
     }
 
@@ -72,32 +75,23 @@ impl LanguageModel for OpenAI {
         &mut self,
         options: LanguageModelCallOptions,
     ) -> Result<LanguageModelStreamingResponse> {
-        let mut request_builder: CreateChatCompletionRequestArgs = From::from(options);
-        request_builder.model(self.model_name());
-        request_builder.stream(true);
+        let mut request: CreateResponse = options.into();
+        request.stream = Some(true);
 
-        let response = self
-            .client
-            .chat()
-            .create_stream(request_builder.build()?)
-            .await?;
-        let r = response
-            .map(|res| {
-                Ok(LanguageModelResponse::new(
-                    res?.choices
-                        .first()
-                        .ok_or::<async_openai::error::OpenAIError>(
-                            async_openai::error::OpenAIError::StreamError(
-                                "Stream chunk has no content".to_string(),
-                            ),
-                        )?
-                        .delta
-                        .content
-                        .clone()
-                        .unwrap_or("".to_string()),
-                ))
+        let openai_stream: ResponseStream = self.client.responses().create_stream(request).await?;
+        let lang_stream = openai_stream.map(|evt_res| {
+            evt_res.map_err(|e| e.into()).map(|evt| match evt {
+                ResponseEvent::ResponseOutputTextDelta(delta) => LanguageModelResponse {
+                    text: delta.delta,
+                    model: None,
+                },
+                _ => LanguageModelResponse {
+                    text: String::new(),
+                    model: None,
+                },
             })
-            .boxed();
-        Ok(r)
+        });
+
+        Ok(Box::pin(lang_stream) as LanguageModelStreamingResponse)
     }
 }
