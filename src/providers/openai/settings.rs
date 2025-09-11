@@ -14,13 +14,13 @@ pub struct OpenAIProviderSettings {
     #[builder(default = "std::env::var(\"OPENAI_API_KEY\").unwrap_or_default()")]
     pub api_key: String,
 
-    /// The model to use for text generation.
-    #[builder(default = "\"gpt-4o\".to_string()")]
-    pub model_name: String,
-
     /// The name of the provider.
     #[builder(default = "\"openai\".to_string()")]
     pub provider_name: String,
+
+    /// The name of the model to use.
+    #[builder(default = "\"gpt-4o\".to_string()")]
+    pub model_name: String,
 }
 
 impl OpenAIProviderSettings {

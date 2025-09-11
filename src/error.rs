@@ -30,16 +30,18 @@ pub enum Error {
     #[error("API error: {0}")]
     ApiError(String),
 
-    /// An error from the underlying `reqwest` client.
-    #[error("HTTP request error: {0}")]
-    ReqwestError(#[from] reqwest::Error),
-
-    #[error("OpenAI error: {0}")]
-    OpenAIError(#[from] async_openai::error::OpenAIError),
+    /// An error for invalid input.
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
 
     /// A catch-all for other miscellaneous errors.
     #[error("AI SDK error: {0}")]
     Other(String),
+
+    /// OpenAI provider error.
+    #[cfg(feature = "openai")]
+    #[error("OpenAI error: {0}")]
+    OpenAIError(#[from] async_openai::error::OpenAIError),
 }
 
 /// Implements `From` for `UninitializedFieldError` to convert it to `Error`.
