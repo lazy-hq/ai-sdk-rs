@@ -12,6 +12,7 @@ pub mod generate_text;
 pub mod language_model;
 pub mod provider;
 pub mod types;
+pub mod tools;
 
 // Re-export key components to provide a clean public API.
 pub use generate_stream::generate_stream;

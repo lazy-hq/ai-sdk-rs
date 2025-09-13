@@ -25,6 +25,7 @@ log = "0.4"
 async-trait = "0.1.88"
 serde = {version = "1.0.219", features = ["derive"]}
 serde_json = { version = "1.0" }
+schemars = "1.0.4"
 thiserror = "2.0.12"
 derive_builder = "0.20.2"
 reqwest = { version = "0.12.5", features = ["json"] }
