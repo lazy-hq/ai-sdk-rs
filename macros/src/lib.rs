@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, Expr, ExprLit, ItemFn, Lit, Meta};
+use syn::{parse_macro_input, Expr, ExprLit, FnArg, ItemFn, Lit, Meta, Pat, ReturnType};
 
 #[proc_macro_attribute]
 pub fn tool_factory(_attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -38,18 +38,66 @@ pub fn tool_factory(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let description = doc_comments.join("\n");
 
+    let struct_fields = inputs.iter().filter_map(|arg| {
+        if let FnArg::Typed(pat_type) = arg {
+            if let Pat::Ident(pat_ident) = &*pat_type.pat {
+                let ident = &pat_ident.ident;
+                let ty = &*pat_type.ty;
+                Some(quote! { #ident: #ty })
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    });
+
+    let binding_tokens: Vec<_> = inputs.iter().filter_map(|arg| {
+        if let FnArg::Typed(pat_type) = arg {
+            if let Pat::Ident(pat_ident) = &*pat_type.pat {
+                let ident = &pat_ident.ident;
+                let ty = &*pat_type.ty;
+                let ident_str = ident.to_string();
+                Some(quote! {
+                    let #ident: #ty = serde_json::from_value(
+                        inp.remove(#ident_str)
+                            .unwrap_or_else(|| todo!("Missing required parameter: {}", #ident_str))
+                    ).unwrap_or_else(|e| {
+                        todo!("Failed to deserialize {}: {}", #ident_str, e)
+                    });
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }).collect();
+
     let expanded = quote! {
         #vis fn #fn_name() -> Tool {
-            let mut tool = Tool::new(); 
-            tool.name = stringify!(#fn_name).to_string();
+            let mut tool = Tool::new();
+
+            #[derive(JsonSchema, Serialize, Debug)]
+            struct ToolInput {
+                #(#struct_fields),*
+            }
+
+            tool.name = stringify!(#fn_name).to_string();  // TODO: Change to better formatted text
+            // than snake case
             tool.description = #description.to_string();
+            tool.input_schema = schema_for!(ToolInput);
+            tool.execute = Box::new(|mut inp: HashMap<String, serde_json::Value>| -> Result<String> {
+                // TODO: Do `input_schema` validation on inp
+                // Extract all parameters from the HashMap here
+                #(#binding_tokens)*
+                if !inp.is_empty() {
+                    return Err(Error::Other(format!("Unexpected parameters: {:?}", inp.keys().collect::<Vec<_>>())));
+                }
+                Ok(#block)
+                //Ok(format!("{:?}", result))
+            });
             tool
-            //Tool {
-            //    name: stringify!(#fn_name).to_string(),
-            //    description: #description.to_string(),
-            //    input_schema: schemars::schema_for!(String),
-            //    execute: Box::new(|inp| -> Result<String> { Ok("place holder".to_string()) }),
-            //}
         }
     };
 

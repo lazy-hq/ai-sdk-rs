@@ -11,8 +11,8 @@ pub mod generate_stream;
 pub mod generate_text;
 pub mod language_model;
 pub mod provider;
-pub mod types;
 pub mod tools;
+pub mod types;
 
 // Re-export key components to provide a clean public API.
 pub use generate_stream::generate_stream;
@@ -20,3 +20,6 @@ pub use generate_text::generate_text;
 pub use language_model::LanguageModel;
 pub use provider::Provider;
 pub use types::{GenerateTextCallOptions, GenerateTextResponse};
+
+
+
