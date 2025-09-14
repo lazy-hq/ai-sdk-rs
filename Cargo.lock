@@ -30,6 +30,7 @@ dependencies = [
 name = "aisdk"
 version = "0.1.0"
 dependencies = [
+ "aisdk-macros",
  "async-openai",
  "async-trait",
  "derive_builder",
@@ -45,6 +46,14 @@ dependencies = [
  "tera",
  "thiserror 2.0.16",
  "tokio",
+]
+
+[[package]]
+name = "aisdk-macros"
+version = "0.1.0"
+dependencies = [
+ "quote",
+ "syn",
 ]
 
 [[package]]
