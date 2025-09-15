@@ -1,4 +1,4 @@
-use crate::core::{ModelMessage, SystemMessage, UserMessage};
+use crate::core::{Message, SystemMessage, UserMessage};
 
 /// Resolves the message to be used for text generation.
 ///
@@ -8,14 +8,14 @@ use crate::core::{ModelMessage, SystemMessage, UserMessage};
 pub fn resolve_message(
     system_prompt: Option<String>,
     prompt: Option<String>,
-    messages: Option<Vec<ModelMessage>>,
-) -> (String, Vec<ModelMessage>) {
+    messages: Option<Vec<Message>>,
+) -> (String, Vec<Message>) {
     let messages = messages.unwrap_or_else(|| {
         vec![
-            ModelMessage::System(SystemMessage::new(
+            Message::System(SystemMessage::new(
                 system_prompt.to_owned().unwrap_or_default(),
             )),
-            ModelMessage::User(UserMessage::new(prompt.unwrap_or_default())),
+            Message::User(UserMessage::new(prompt.unwrap_or_default())),
         ]
     });
 
@@ -23,7 +23,7 @@ pub fn resolve_message(
         messages
             .iter()
             .find_map(|m| match m {
-                ModelMessage::System(s) => Some(s.content.to_string()),
+                Message::System(s) => Some(s.content.to_string()),
                 _ => None,
             })
             .unwrap_or_default()

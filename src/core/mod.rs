@@ -20,6 +20,6 @@ pub use generate_text::generate_text;
 pub use language_model::LanguageModel;
 pub use provider::Provider;
 pub use types::{
-    AssistantMessage, GenerateTextCallOptions, GenerateTextResponse, ModelMessage, Role,
+    AssistantMessage, GenerateTextCallOptions, GenerateTextResponse, Message, Role,
     SystemMessage, UserMessage,
 };

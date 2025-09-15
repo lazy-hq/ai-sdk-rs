@@ -4,7 +4,7 @@ use async_openai::types::responses::{
     CreateResponse, Input, InputContent, InputItem, InputMessage, InputMessageType, Role,
 };
 
-use crate::core::types::{LanguageModelCallOptions, ModelMessage};
+use crate::core::types::{LanguageModelCallOptions, Message};
 
 impl From<LanguageModelCallOptions> for CreateResponse {
     fn from(options: LanguageModelCallOptions) -> Self {
@@ -38,12 +38,12 @@ impl From<LanguageModelCallOptions> for CreateResponse {
     }
 }
 
-impl From<ModelMessage> for InputMessage {
-    fn from(m: ModelMessage) -> Self {
+impl From<Message> for InputMessage {
+    fn from(m: Message) -> Self {
         let (role, text) = match m {
-            ModelMessage::System(s) => (Role::System, s.content),
-            ModelMessage::User(u) => (Role::User, u.content),
-            ModelMessage::Assistant(a) => (Role::Assistant, a.content),
+            Message::System(s) => (Role::System, s.content),
+            Message::User(u) => (Role::User, u.content),
+            Message::Assistant(a) => (Role::Assistant, a.content),
         };
         InputMessage {
             role,

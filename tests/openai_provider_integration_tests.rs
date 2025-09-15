@@ -3,7 +3,7 @@
 use aisdk::{
     Error,
     core::{
-        AssistantMessage, GenerateTextCallOptions, ModelMessage, SystemMessage, UserMessage,
+        AssistantMessage, GenerateTextCallOptions, Message, SystemMessage, UserMessage,
         generate_stream, generate_text,
     },
     providers::openai::{OpenAI, OpenAIProviderSettings},
@@ -140,12 +140,12 @@ async fn test_generate_text_with_messages() {
 
     let options = GenerateTextCallOptions::builder()
         .messages(Some(vec![
-            ModelMessage::System(SystemMessage::new(
+            Message::System(SystemMessage::new(
                 "You are a helpful assistant.".to_string(),
             )),
-            ModelMessage::User(UserMessage::new("Whatsup?, Surafel is here".to_string())),
-            ModelMessage::Assistant(AssistantMessage::new("How could I help you?".to_string())),
-            ModelMessage::User(UserMessage::new("Could you tell my name?".to_string())),
+            Message::User(UserMessage::new("Whatsup?, Surafel is here".to_string())),
+            Message::Assistant(AssistantMessage::new("How could I help you?".to_string())),
+            Message::User(UserMessage::new("Could you tell my name?".to_string())),
         ]))
         .build()
         .expect("Failed to build GenerateTextCallOptions");
@@ -182,9 +182,9 @@ async fn test_generate_text_with_messages_and_system_prompt() {
                 .to_string(),
         ))
         .messages(Some(vec![
-            ModelMessage::User(UserMessage::new("Whatsup?, Surafel is here".to_string())),
-            ModelMessage::Assistant(AssistantMessage::new("How could I help you?".to_string())),
-            ModelMessage::User(UserMessage::new("Could you tell my name?".to_string())),
+            Message::User(UserMessage::new("Whatsup?, Surafel is here".to_string())),
+            Message::Assistant(AssistantMessage::new("How could I help you?".to_string())),
+            Message::User(UserMessage::new("Could you tell my name?".to_string())),
         ]))
         .build()
         .expect("Failed to build GenerateTextCallOptions");
@@ -216,14 +216,14 @@ async fn test_generate_text_with_messages_and_inmessage_system_prompt() {
 
     let options = GenerateTextCallOptions::builder()
         .messages(Some(vec![
-            ModelMessage::System(SystemMessage::new(
+            Message::System(SystemMessage::new(
                 "Only say hello whatever the user says. \n
                 all lowercase no punctuation, prefixes, or suffixes."
                     .to_string(),
             )),
-            ModelMessage::User(UserMessage::new("Whatsup?, Surafel is here".to_string())),
-            ModelMessage::Assistant(AssistantMessage::new("How could I help you?".to_string())),
-            ModelMessage::User(UserMessage::new("Could you tell my name?".to_string())),
+            Message::User(UserMessage::new("Whatsup?, Surafel is here".to_string())),
+            Message::Assistant(AssistantMessage::new("How could I help you?".to_string())),
+            Message::User(UserMessage::new("Could you tell my name?".to_string())),
         ]))
         .build()
         .expect("Failed to build GenerateTextCallOptions");
@@ -246,7 +246,7 @@ async fn test_generate_text_builder_with_both_prompt_and_messages() {
             all lowercase no punctuation, prefixes, or suffixes."
                 .to_string(),
         ))
-        .messages(Some(vec![ModelMessage::User(UserMessage::new(
+        .messages(Some(vec![Message::User(UserMessage::new(
             "Whatsup?, Surafel is here".to_string(),
         ))]))
         .build();

@@ -15,9 +15,9 @@ pub enum Role {
     Assistant,
 }
 
-/// Model message types.
+/// Message Type for model messages.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ModelMessage {
+pub enum Message {
     System(SystemMessage),
     User(UserMessage),
     Assistant(AssistantMessage),
@@ -121,7 +121,7 @@ define_with_lm_call_options!(
     ),
     (
         messages,
-        Option<Vec<ModelMessage>>,
+        Option<Vec<Message>>,
         None,
         "The messages to generate text from. Uses the chat format. Only one of prompt or messages should be set."
     ),
