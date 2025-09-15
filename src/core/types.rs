@@ -186,9 +186,12 @@ impl LanguageModelCallOptions {
 }
 
 /// Response from a `generate_stream` call.
-pub struct GenerateStreamResponse {
+pub struct LanguageModelStreamResponse {
     /// A stream of responses from the language model.
-    pub stream: LanguageModelStreamingResponse,
+    pub stream: StreamChunk,
+    
+    /// The model that generated the response.
+    pub model: Option<String>,
 }
 
 // TODO: constract a standard response type
@@ -216,10 +219,17 @@ impl LanguageModelResponse {
     }
 }
 
-/// Chunked response from a language model.
-pub type LanguageModelResponseChunk = LanguageModelResponse; // change this anytime chunk data
-
 /// Stream of responses from a language model's streaming API mapped to a common
 /// interface.
-pub type LanguageModelStreamingResponse =
-    Pin<Box<dyn Stream<Item = Result<LanguageModelResponse>> + Send>>;
+pub type StreamChunk =
+    Pin<Box<dyn Stream<Item = Result<StreamChunkData>> + Send>>;
+
+/// Chunked response from a language model.
+pub struct StreamChunkData {
+    /// The generated text.
+    pub text: String,
+
+    /// The reason the model stopped generating text.
+    pub stop_reason: Option<String>,
+}
+

@@ -6,7 +6,7 @@
 //! unified interface for various operations like text generation or streaming.
 
 use crate::core::types::{
-    LanguageModelCallOptions, LanguageModelResponse, LanguageModelStreamingResponse,
+    LanguageModelStreamResponse, LanguageModelCallOptions, LanguageModelResponse
 };
 use crate::error::Result;
 use async_trait::async_trait;
@@ -47,5 +47,5 @@ pub trait LanguageModel: Send + Sync + std::fmt::Debug {
     async fn generate_stream(
         &mut self,
         options: LanguageModelCallOptions,
-    ) -> Result<LanguageModelStreamingResponse>;
+    ) -> Result<LanguageModelStreamResponse>;
 }

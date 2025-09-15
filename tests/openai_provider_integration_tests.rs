@@ -73,7 +73,9 @@ async fn test_generate_stream_with_openai() {
         .build()
         .expect("Failed to build GenerateTextCallOptions");
 
-    let mut stream = generate_stream(openai, options).await.unwrap().stream;
+    let response = generate_stream(openai, options).await.unwrap();
+    let mut stream = response.stream;
+
     let mut buf = String::new();
     while let Some(chunk) = stream.next().await {
         if let Ok(lang_resp) = chunk
@@ -82,6 +84,11 @@ async fn test_generate_stream_with_openai() {
             buf.push_str(&lang_resp.text);
         }
     }
+
+    if let Some(model) = response.model {
+        assert!(model.starts_with("gpt-4o"));
+    }
+
     assert!(buf.contains("hello"));
 }
 

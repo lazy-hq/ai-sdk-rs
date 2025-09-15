@@ -7,14 +7,15 @@ use async_openai::types::responses::{
     Content, CreateResponse, OutputContent, Response, ResponseEvent, ResponseStream,
 };
 use async_openai::{Client, config::OpenAIConfig};
-use futures::StreamExt;
+use futures::{StreamExt, stream::once};
 pub use settings::OpenAIProviderSettings;
 
+use crate::core::types::LanguageModelStreamResponse;
 use crate::{
     core::{
         language_model::LanguageModel,
         provider::Provider,
-        types::{LanguageModelCallOptions, LanguageModelResponse, LanguageModelStreamingResponse},
+        types::{LanguageModelCallOptions, LanguageModelResponse, StreamChunkData},
     },
     error::Result,
 };
@@ -77,12 +78,32 @@ impl LanguageModel for OpenAI {
     async fn generate_stream(
         &mut self,
         options: LanguageModelCallOptions,
-    ) -> Result<LanguageModelStreamingResponse> {
+    ) -> Result<LanguageModelStreamResponse> {
         let mut request: CreateResponse = options.into();
         request.model = self.settings.model_name.to_string();
         request.stream = Some(true);
 
         let openai_stream: ResponseStream = self.client.responses().create_stream(request).await?;
+
+        let (first, rest) = openai_stream.into_future().await;
+
+        // get the model name from the first response
+        let model = match &first {
+            Some(Ok(ResponseEvent::ResponseCreated(r))) => Some(
+                r.response
+                    .model
+                    .as_ref()
+                    .unwrap_or(&self.settings.model_name)
+                    .to_string(),
+            ),
+            _ => None,
+        };
+
+        let openai_stream = if let Some(first) = first {
+            Box::pin(once(async move { first }).chain(rest))
+        } else {
+            rest
+        };
 
         #[derive(Default)]
         struct StreamState {
@@ -97,18 +118,16 @@ impl LanguageModel for OpenAI {
             }
 
             futures::future::ready(match evt_res {
-                Ok(ResponseEvent::ResponseOutputTextDelta(d)) => Some(Ok(LanguageModelResponse {
+                Ok(ResponseEvent::ResponseOutputTextDelta(d)) => Some(Ok(StreamChunkData {
                     text: d.delta,
-                    model: None,
-                    stop_reason: None,
+                    stop_reason: state.stop_reason.clone(),
                 })),
                 Ok(ResponseEvent::ResponseCompleted(_)) => {
                     state.stop_reason = Some("completed".into());
                     state.completed = true;
-                    Some(Ok(LanguageModelResponse {
+                    Some(Ok(StreamChunkData {
                         text: String::new(),
-                        model: None,
-                        stop_reason: Some("completed".into()),
+                        stop_reason: state.stop_reason.clone(),
                     }))
                 }
                 Ok(ResponseEvent::ResponseFailed(f)) => {
@@ -122,16 +141,14 @@ impl LanguageModel for OpenAI {
                     state.completed = true;
                     state.stop_reason = Some(reason);
 
-                    Some(Ok(LanguageModelResponse {
+                    Some(Ok(StreamChunkData {
                         text: String::new(),
-                        model: None,
                         stop_reason: state.stop_reason.clone(),
                     }))
                 }
                 // TODO: handle other events
-                Ok(_) => Some(Ok(LanguageModelResponse {
+                Ok(_) => Some(Ok(StreamChunkData {
                     text: String::new(),
-                    model: None,
                     stop_reason: None,
                 })),
                 Err(e) => {
@@ -141,6 +158,9 @@ impl LanguageModel for OpenAI {
             })
         });
 
-        Ok(Box::pin(stream) as LanguageModelStreamingResponse)
+        Ok(LanguageModelStreamResponse {
+            stream: Box::pin(stream),
+            model,
+        })
     }
 }

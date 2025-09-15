@@ -3,7 +3,7 @@
 use crate::{
     core::{
         language_model::LanguageModel,
-        types::{GenerateStreamResponse, GenerateTextCallOptions, LanguageModelCallOptions},
+        types::{LanguageModelStreamResponse, GenerateTextCallOptions, LanguageModelCallOptions},
         utils::resolve_message,
     },
     error::Result,
@@ -28,7 +28,7 @@ use crate::{
 pub async fn generate_stream(
     mut model: impl LanguageModel,
     options: GenerateTextCallOptions,
-) -> Result<GenerateStreamResponse> {
+) -> Result<LanguageModelStreamResponse> {
     let (system_prompt, messages) =
         resolve_message(options.system, options.prompt, options.messages);
 
@@ -46,5 +46,5 @@ pub async fn generate_stream(
         )
         .await?;
 
-    Ok(GenerateStreamResponse { stream: response })
+    Ok(response)
 }
