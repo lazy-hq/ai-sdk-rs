@@ -6,7 +6,7 @@
 //! unified interface for various operations like text generation or streaming.
 
 use crate::core::types::{
-    LanguageModelStreamResponse, LanguageModelCallOptions, LanguageModelResponse
+    LanguageModelCallOptions, LanguageModelResponse, LanguageModelStreamResponse,
 };
 use crate::error::Result;
 use async_trait::async_trait;

@@ -3,7 +3,7 @@
 use crate::{
     core::{
         language_model::LanguageModel,
-        types::{LanguageModelStreamResponse, GenerateTextCallOptions, LanguageModelCallOptions},
+        types::{GenerateTextCallOptions, LanguageModelCallOptions, LanguageModelStreamResponse},
         utils::resolve_message,
     },
     error::Result,

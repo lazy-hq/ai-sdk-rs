@@ -189,7 +189,7 @@ impl LanguageModelCallOptions {
 pub struct LanguageModelStreamResponse {
     /// A stream of responses from the language model.
     pub stream: StreamChunk,
-    
+
     /// The model that generated the response.
     pub model: Option<String>,
 }
@@ -221,8 +221,7 @@ impl LanguageModelResponse {
 
 /// Stream of responses from a language model's streaming API mapped to a common
 /// interface.
-pub type StreamChunk =
-    Pin<Box<dyn Stream<Item = Result<StreamChunkData>> + Send>>;
+pub type StreamChunk = Pin<Box<dyn Stream<Item = Result<StreamChunkData>> + Send>>;
 
 /// Chunked response from a language model.
 pub struct StreamChunkData {
@@ -232,4 +231,3 @@ pub struct StreamChunkData {
     /// The reason the model stopped generating text.
     pub stop_reason: Option<String>,
 }
-
