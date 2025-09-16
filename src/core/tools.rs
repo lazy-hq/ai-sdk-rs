@@ -1,19 +1,58 @@
 use crate::error::{Error, Result};
 use aisdk_macros::tool_factory;
+use derive_builder::Builder;
 use schemars::{JsonSchema, Schema, schema_for};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::fmt::Debug;
+use std::sync::{Arc, Mutex};
 
+pub type ToolFn = Box<dyn FnMut(HashMap<String, Value>) -> Result<String> + Send + Sync>;
+
+#[derive(Clone)]
+pub struct ToolExecute {
+    inner: Arc<Mutex<ToolFn>>,
+}
+
+impl ToolExecute {
+    pub fn call(&self, map: HashMap<String, Value>) -> Result<String> {
+        let mut guard = self.inner.lock().unwrap();
+        (&mut *guard)(map)
+    }
+
+    pub fn new(f: ToolFn) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(f)),
+        }
+    }
+}
+
+impl Default for ToolExecute {
+    fn default() -> Self {
+        Self::new(Box::new(|_| Ok("".to_string())))
+    }
+}
+
+#[derive(Builder, Clone, Serialize, Deserialize)]
+#[builder(pattern = "owned", setter(into), build_fn(error = "Error"))]
 pub struct Tool {
     /// The name of the tool
     pub name: String,
     /// AI friendly description
     pub description: String,
-    /// Tool inputs
     pub input_schema: Schema,
     /// The output schema of the tool. AI will use this to generate outputs.
-    pub execute: Box<dyn FnMut(HashMap<String, Value>) -> Result<String>>,
+    pub execute: ToolExecute,
+}
+
+impl Debug for Tool {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Tool")
+            .field("name", &self.name)
+            .field("description", &self.description)
+            .finish()
+    }
 }
 
 impl Tool {
@@ -22,8 +61,26 @@ impl Tool {
             name: "".to_string(),
             description: "".to_string(),
             input_schema: Schema::default(),
-            execute: Box::new(|_| Ok("".to_string())),
+            execute: ToolExecute::default(),
         }
+    }
+}
+
+impl Serialize for ToolExecute {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&format!("ToolExecuteCall"))
+    }
+}
+
+impl<'de> Deserialize<'de> for ToolExecute {
+    fn deserialize<D>(_: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(Self::default())
     }
 }
 
@@ -41,7 +98,7 @@ mod tests {
     #[test]
     fn test_macro() {
         schemars::schema_for!(String);
-        let mut tool = my_example_tool();
+        let tool = my_example_tool();
 
         assert_eq!(tool.name, "my_example_tool");
         assert_eq!(
@@ -70,11 +127,12 @@ mod tests {
             ])
         );
         assert_eq!(
-            (tool.execute)(HashMap::from([
-                ("a".to_string(), 1.into()),
-                ("b".to_string(), Option::<u32>::None.into())
-            ]))
-            .unwrap(),
+            tool.execute
+                .call(HashMap::from([
+                    ("a".to_string(), 1.into()),
+                    ("b".to_string(), Option::<u32>::None.into())
+                ]))
+                .unwrap(),
             "10".to_string()
         );
     }

@@ -1,6 +1,8 @@
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, Expr, ExprLit, FnArg, ItemFn, Lit, Meta, Pat, ReturnType};
+use schemars::{JsonSchema, Schema, schema_for};
+use serde::{Deserialize, Serialize};
 
 #[proc_macro_attribute]
 pub fn tool_factory(_attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -87,7 +89,7 @@ pub fn tool_factory(_attr: TokenStream, item: TokenStream) -> TokenStream {
             // than snake case
             tool.description = #description.to_string();
             tool.input_schema = schema_for!(ToolInput);
-            tool.execute = Box::new(|mut inp: HashMap<String, serde_json::Value>| -> Result<String> {
+            tool.execute = ToolExecute::new(Box::new(|mut inp: HashMap<String, serde_json::Value>| -> Result<String> {
                 // TODO: Do `input_schema` validation on inp
                 // Extract all parameters from the HashMap here
                 #(#binding_tokens)*
@@ -96,7 +98,7 @@ pub fn tool_factory(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 }
                 Ok(#block)
                 //Ok(format!("{:?}", result))
-            });
+            }));
             tool
         }
     };

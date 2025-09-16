@@ -6,6 +6,12 @@ use aisdk::{
 };
 use dotenv::dotenv;
 use futures::StreamExt;
+use aisdk_macros::tool_factory;
+
+#[tool_factory]
+fn example_tool() {
+    String::from("")
+}
 
 #[tokio::test]
 async fn test_generate_text_with_openai() {

@@ -5,6 +5,7 @@ use futures::Stream;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 
+use crate::core::tools::Tool;
 use crate::error::{Error, Result};
 
 /// Shortens the definition of the `GenerateTextCallOptions` and
@@ -70,13 +71,23 @@ define_with_lm_call_options!(
     (temprature, Option<u32>, None, "Randomness."),
     (top_p, Option<u32>, None, "Nucleus sampling."),
     (top_k, Option<u32>, None, "Top-k sampling."),
-    (stop, Option<Vec<String>>, None, "Stop sequence.")
+    (stop, Option<Vec<String>>, None, "Stop sequence."),
+    (tools, Vec<Tool>, vec![], "Tools to use.")
 );
 
 impl GenerateTextCallOptions {
     /// Creates a new builder for `GenerateTextCallOptions`.
     pub fn builder() -> GenerateTextCallOptionsBuilder {
         GenerateTextCallOptionsBuilder::default()
+    }
+}
+
+impl GenerateTextCallOptionsBuilder {
+    pub fn with_tool(mut self, tool: Tool) -> Self {
+        let mut tools = self.tools.unwrap_or_default();
+        tools.push(tool);
+        self.tools = Some(tools);
+        self
     }
 }
 
