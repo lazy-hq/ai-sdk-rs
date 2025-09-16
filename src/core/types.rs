@@ -8,13 +8,77 @@ use std::pin::Pin;
 use crate::core::tools::Tool;
 use crate::error::{Error, Result};
 
+/// Role for model messages.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Role {
+    System,
+    User,
+    Assistant,
+}
+
+/// Message Type for model messages.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Message {
+    System(SystemMessage),
+    User(UserMessage),
+    Assistant(AssistantMessage),
+}
+
+/// System model message.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemMessage {
+    role: Role,
+    pub content: String,
+}
+
+impl SystemMessage {
+    pub fn new(content: impl Into<String>) -> Self {
+        Self {
+            role: Role::System,
+            content: content.into(),
+        }
+    }
+}
+
+/// User model message.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserMessage {
+    role: Role,
+    pub content: String,
+}
+
+impl UserMessage {
+    pub fn new(content: impl Into<String>) -> Self {
+        Self {
+            role: Role::User,
+            content: content.into(),
+        }
+    }
+}
+
+/// Assistant model message.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssistantMessage {
+    role: Role,
+    pub content: String,
+}
+
+impl AssistantMessage {
+    pub fn new(content: impl Into<String>) -> Self {
+        Self {
+            role: Role::Assistant,
+            content: content.into(),
+        }
+    }
+}
+
 /// Shortens the definition of the `GenerateTextCallOptions` and
 /// `LanguageModelCallOptions` because all the fields from the first are also
 /// second.
 macro_rules! define_with_lm_call_options {
         ( $( ($field:ident, $typ:ty, $default:expr, $comment:expr) ),* ) => {
             #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
-            #[builder(pattern = "owned", setter(into), build_fn(error = "Error"))]
+            #[builder(pattern = "owned", setter(into), build_fn(name = "build_inner", error = "Error"))]
             pub struct GenerateTextCallOptions  {
                 $(
                     #[doc = $comment]
@@ -22,6 +86,11 @@ macro_rules! define_with_lm_call_options {
                     pub $field: $typ,
                 )*
                 // Define `GenerateTextCallOptions` specific entries here
+
+                /// The prompt to generate text from. Uses the completion format.
+                /// Only one of prompt or messages should be set.
+                #[builder(default = "None")]
+                pub prompt: Option<String>,
 
                 /// Maximum number of retries.
                 #[builder(default = "100")]
@@ -42,25 +111,20 @@ macro_rules! define_with_lm_call_options {
         };
 }
 
+// TODO: add support for main options
 define_with_lm_call_options!(
     // identifier, type, default, comment
     (
-        prompt,
-        String,
-        "".to_string(),
-        "The prompt to generate text from. uses the completion format. If both prompt and messages are set, prompt will be ignored."
-    ),
-    (
-        system_prompt,
+        system,
         Option<String>,
         None,
-        "The system prompt to generate text from."
+        "System prompt to be used for the request."
     ),
     (
         messages,
-        Option<Vec<String>>,
+        Option<Vec<Message>>,
         None,
-        "The messages to generate text from. uses the chat format. If both prompt and messages are set, prompt will be ignored."
+        "The messages to generate text from. Uses the chat format. Only one of prompt or messages should be set."
     ),
     (
         max_tokens,
@@ -68,7 +132,7 @@ define_with_lm_call_options!(
         None,
         "The maximum number of tokens to generate."
     ),
-    (temprature, Option<u32>, None, "Randomness."),
+    (temperature, Option<u32>, None, "Randomness."),
     (top_p, Option<u32>, None, "Nucleus sampling."),
     (top_k, Option<u32>, None, "Top-k sampling."),
     (stop, Option<Vec<String>>, None, "Stop sequence."),
@@ -113,11 +177,15 @@ impl LanguageModelCallOptions {
 }
 
 /// Response from a `generate_stream` call.
-pub struct GenerateStreamResponse {
+pub struct LanguageModelStreamResponse {
     /// A stream of responses from the language model.
-    pub stream: LanguageModelStreamingResponse,
+    pub stream: StreamChunk,
+
+    /// The model that generated the response.
+    pub model: Option<String>,
 }
 
+// TODO: constract a standard response type
 /// Response from a language model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LanguageModelResponse {
@@ -126,6 +194,9 @@ pub struct LanguageModelResponse {
 
     /// The model that generated the response.
     pub model: Option<String>,
+
+    /// The reason the model stopped generating text.
+    pub stop_reason: Option<String>,
 }
 
 impl LanguageModelResponse {
@@ -134,14 +205,20 @@ impl LanguageModelResponse {
         Self {
             text: text.into(),
             model: None,
+            stop_reason: None,
         }
     }
 }
 
-/// Chunked response from a language model.
-pub type LanguageModelResponseChunk = LanguageModelResponse; // change this anytime chunk data
-
 /// Stream of responses from a language model's streaming API mapped to a common
 /// interface.
-pub type LanguageModelStreamingResponse =
-    Pin<Box<dyn Stream<Item = Result<LanguageModelResponse>>>>;
+pub type StreamChunk = Pin<Box<dyn Stream<Item = Result<StreamChunkData>> + Send>>;
+
+/// Chunked response from a language model.
+pub struct StreamChunkData {
+    /// The generated text.
+    pub text: String,
+
+    /// The reason the model stopped generating text.
+    pub stop_reason: Option<String>,
+}
