@@ -1,22 +1,21 @@
 //! This module provides the OpenAI provider, which implements the `LanguageModel`
 //! and `Provider` traits for interacting with the OpenAI API.
 
+pub mod conversions;
 pub mod settings;
-
-use async_openai::types::{
-    ChatCompletionRequestMessage, ChatCompletionRequestSystemMessage,
-    ChatCompletionRequestUserMessage, ChatCompletionRequestUserMessageContent,
-    ChatCompletionRequestUserMessageContentPart, CreateChatCompletionRequestArgs,
+use async_openai::types::responses::{
+    Content, CreateResponse, OutputContent, Response, ResponseEvent, ResponseStream,
 };
 use async_openai::{Client, config::OpenAIConfig};
-use futures::StreamExt;
+use futures::{StreamExt, stream::once};
 pub use settings::OpenAIProviderSettings;
 
+use crate::core::types::LanguageModelStreamResponse;
 use crate::{
     core::{
         language_model::LanguageModel,
         provider::Provider,
-        types::{LanguageModelCallOptions, LanguageModelResponse, LanguageModelStreamingResponse},
+        types::{LanguageModelCallOptions, LanguageModelResponse, StreamChunkData},
     },
     error::Result,
 };
@@ -39,73 +38,6 @@ impl OpenAI {
 
         Self { client, settings }
     }
-
-    fn user_message(message: &str) -> ChatCompletionRequestMessage {
-        ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage::from(message))
-    }
-
-    fn system_message(message: &str) -> ChatCompletionRequestMessage {
-        ChatCompletionRequestMessage::System(ChatCompletionRequestSystemMessage::from(message))
-    }
-}
-
-struct OpenAiMessage(ChatCompletionRequestMessage);
-
-impl From<OpenAiMessage> for String {
-    /// Handle the conversion from any `OpenAiMessage` to `String`. Currently it only handles
-    /// user messages that are texts or part of a text. returns empty string if it is not.
-    fn from(value: OpenAiMessage) -> Self {
-        match value.0 {
-            ChatCompletionRequestMessage::User(user_message) => match &user_message.content {
-                ChatCompletionRequestUserMessageContent::Text(text) => text.to_string(),
-                ChatCompletionRequestUserMessageContent::Array(arr) => match arr.first().unwrap() {
-                    ChatCompletionRequestUserMessageContentPart::Text(text) => {
-                        text.text.to_string()
-                    }
-                    _ => "".to_string(),
-                },
-            },
-            _ => "".to_string(),
-        }
-    }
-}
-
-impl From<LanguageModelCallOptions> for CreateChatCompletionRequestArgs {
-    fn from(options: LanguageModelCallOptions) -> Self {
-        let mut request_builder = CreateChatCompletionRequestArgs::default();
-        //request_builder.model(self.model_name().to_string());
-
-        if let Some(max_tokens) = options.max_tokens {
-            request_builder.max_tokens(max_tokens);
-        };
-
-        if let Some(temprature) = options.temprature {
-            request_builder.temperature(temprature as f32 / 100_f32);
-        };
-
-        if let Some(top_p) = options.top_p {
-            request_builder.top_p(top_p as f32 / 100_f32);
-        };
-
-        if options.top_k.is_some() {
-            log::warn!("WrongProviderInput: top_k is not supported by OpenAI");
-        };
-
-        if let Some(stop) = options.stop {
-            request_builder.stop(stop);
-        };
-
-        let msg: ChatCompletionRequestMessage =
-            OpenAiMessage(OpenAI::user_message(&options.prompt)).0;
-        let mut msgs = vec![msg];
-
-        if let Some(system_prompt) = options.system_prompt {
-            msgs.push(OpenAI::system_message(&system_prompt));
-        }
-        request_builder.messages(msgs);
-
-        request_builder
-    }
 }
 
 impl Provider for OpenAI {}
@@ -116,59 +48,119 @@ impl LanguageModel for OpenAI {
         &self.settings.provider_name
     }
 
-    fn model_name(&self) -> &str {
-        &self.settings.model_name
-    }
-
     async fn generate(
         &mut self,
         options: LanguageModelCallOptions,
     ) -> Result<LanguageModelResponse> {
-        let mut request_builder: CreateChatCompletionRequestArgs = From::from(options);
-        request_builder.model(self.model_name());
+        let mut request: CreateResponse = options.into();
+        request.model = self.settings.model_name.to_string();
 
-        let response = self.client.chat().create(request_builder.build()?).await?;
-        let text = match response.choices.first() {
-            Some(choice) => &choice.message.content.clone().expect("no content"),
-            None => "",
-        };
+        let response: Response = self.client.responses().create(request).await?;
+        let text = response
+            .output
+            .iter()
+            .find_map(|out| match out {
+                OutputContent::Message(msg) => msg.content.iter().find_map(|c| match c {
+                    Content::OutputText(t) => Some(t.text.to_string()),
+                    _ => None,
+                }),
+                _ => None,
+            })
+            .unwrap_or_default();
 
         Ok(LanguageModelResponse {
-            model: Some(response.model),
-            text: text.to_string(),
+            model: Some(response.model.to_string()),
+            text,
+            stop_reason: None,
         })
     }
 
     async fn generate_stream(
         &mut self,
         options: LanguageModelCallOptions,
-    ) -> Result<LanguageModelStreamingResponse> {
-        let mut request_builder: CreateChatCompletionRequestArgs = From::from(options);
-        request_builder.model(self.model_name());
-        request_builder.stream(true);
+    ) -> Result<LanguageModelStreamResponse> {
+        let mut request: CreateResponse = options.into();
+        request.model = self.settings.model_name.to_string();
+        request.stream = Some(true);
 
-        let response = self
-            .client
-            .chat()
-            .create_stream(request_builder.build()?)
-            .await?;
-        let r = response
-            .map(|res| {
-                Ok(LanguageModelResponse::new(
-                    res?.choices
-                        .first()
-                        .ok_or::<async_openai::error::OpenAIError>(
-                            async_openai::error::OpenAIError::StreamError(
-                                "Stream chunk has no content".to_string(),
-                            ),
-                        )?
-                        .delta
-                        .content
-                        .clone()
-                        .unwrap_or("".to_string()),
-                ))
+        let openai_stream: ResponseStream = self.client.responses().create_stream(request).await?;
+
+        let (first, rest) = openai_stream.into_future().await;
+
+        // get the model name from the first response
+        let model = match &first {
+            Some(Ok(ResponseEvent::ResponseCreated(r))) => Some(
+                r.response
+                    .model
+                    .as_ref()
+                    .unwrap_or(&self.settings.model_name)
+                    .to_string(),
+            ),
+            _ => None,
+        };
+
+        let openai_stream = if let Some(first) = first {
+            Box::pin(once(async move { first }).chain(rest))
+        } else {
+            rest
+        };
+
+        #[derive(Default)]
+        struct StreamState {
+            stop_reason: Option<String>,
+            completed: bool,
+        }
+
+        let stream = openai_stream.scan(StreamState::default(), |state, evt_res| {
+            // If already completed, don't emit anything more
+            if state.completed {
+                return futures::future::ready(None);
+            }
+
+            futures::future::ready(match evt_res {
+                Ok(ResponseEvent::ResponseOutputTextDelta(d)) => Some(Ok(StreamChunkData {
+                    text: d.delta,
+                    stop_reason: state.stop_reason.clone(),
+                })),
+                Ok(ResponseEvent::ResponseCompleted(_)) => {
+                    state.stop_reason = Some("completed".into());
+                    state.completed = true;
+                    Some(Ok(StreamChunkData {
+                        text: String::new(),
+                        stop_reason: state.stop_reason.clone(),
+                    }))
+                }
+                Ok(ResponseEvent::ResponseFailed(f)) => {
+                    let reason = f
+                        .response
+                        .error
+                        .as_ref()
+                        .map(|e| format!("{}: {}", e.code, e.message))
+                        .unwrap_or_else(|| "unknown failure".to_string());
+
+                    state.completed = true;
+                    state.stop_reason = Some(reason);
+
+                    Some(Ok(StreamChunkData {
+                        text: String::new(),
+                        stop_reason: state.stop_reason.clone(),
+                    }))
+                }
+                // TODO: handle other events
+                Ok(_) => Some(Ok(StreamChunkData {
+                    text: String::new(),
+                    stop_reason: None,
+                })),
+                Err(e) => {
+                    state.completed = true;
+                    Some(Err(e.into()))
+                }
             })
-            .boxed();
-        Ok(r)
+        });
+
+        Ok(LanguageModelStreamResponse {
+            stream: Box::pin(stream),
+            model,
+        })
     }
 }
