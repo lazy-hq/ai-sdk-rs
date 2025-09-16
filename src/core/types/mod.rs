@@ -5,10 +5,7 @@ mod responses;
 
 // re-export key components for better public API.
 pub use messages::{AssistantMessage, Message, Role, SystemMessage, UserMessage};
-pub use options::{
-    GenerateTextCallOptions, GenerateTextCallOptionsBuilder, LanguageModelCallOptions,
-    LanguageModelCallOptionsBuilder,
-};
+pub use options::{GenerateTextCallOptions, LanguageModelCallOptions};
 pub use responses::{
     GenerateTextResponse, LanguageModelResponse, LanguageModelStreamResponse, StreamChunk,
     StreamChunkData,
