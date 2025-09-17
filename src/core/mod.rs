@@ -19,7 +19,4 @@ pub use generate_stream::generate_stream;
 pub use generate_text::generate_text;
 pub use language_model::LanguageModel;
 pub use provider::Provider;
-pub use types::{
-    AssistantMessage, GenerateTextCallOptions, GenerateTextResponse, Message, Role, SystemMessage,
-    UserMessage,
-};
+pub use types::*;
