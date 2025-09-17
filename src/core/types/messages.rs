@@ -17,6 +17,10 @@ pub enum Message {
 }
 
 impl Message {
+    pub fn conversation_builder() -> MessageBuilder<Conversation> {
+        MessageBuilder::conversation_builder()
+    }
+
     pub fn builder() -> MessageBuilder<Initial> {
         MessageBuilder::builder()
     }
@@ -88,6 +92,13 @@ pub struct MessageBuilder<State = Initial> {
 }
 
 impl MessageBuilder {
+    pub fn conversation_builder() -> MessageBuilder<Conversation> {
+        MessageBuilder {
+            messages: Vec::new(),
+            state: std::marker::PhantomData,
+        }
+    }
+
     pub fn builder() -> MessageBuilder<Initial> {
         MessageBuilder {
             messages: Vec::new(),
