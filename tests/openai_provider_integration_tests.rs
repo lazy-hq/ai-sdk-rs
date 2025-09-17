@@ -2,10 +2,7 @@
 
 use aisdk::{
     Error,
-    core::{
-        AssistantMessage, GenerateTextCallOptions, Message, SystemMessage, UserMessage,
-        generate_stream, generate_text,
-    },
+    core::{GenerateTextCallOptions, Message, generate_stream, generate_text},
     providers::openai::{OpenAI, OpenAIProviderSettings},
 };
 use dotenv::dotenv;
@@ -145,15 +142,15 @@ async fn test_generate_text_with_messages() {
 
     let openai = OpenAI::new(settings);
 
+    let messages = Message::builder()
+        .system("You are a helpful assistant.")
+        .user("Whatsup?, Surafel is here")
+        .assistant("How could I help you?")
+        .user("Could you tell my name?")
+        .build();
+
     let options = GenerateTextCallOptions::builder()
-        .messages(Some(vec![
-            Message::System(SystemMessage::new(
-                "You are a helpful assistant.".to_string(),
-            )),
-            Message::User(UserMessage::new("Whatsup?, Surafel is here".to_string())),
-            Message::Assistant(AssistantMessage::new("How could I help you?".to_string())),
-            Message::User(UserMessage::new("Could you tell my name?".to_string())),
-        ]))
+        .messages(Some(messages))
         .build()
         .expect("Failed to build GenerateTextCallOptions");
 
@@ -182,17 +179,20 @@ async fn test_generate_text_with_messages_and_system_prompt() {
 
     let openai = OpenAI::new(settings);
 
+    let messages = Message::builder()
+        .system("Only say hello whatever the user says. \n all lowercase no punctuation, prefixes, or suffixes.")
+        .user("Whatsup?, Surafel is here")
+        .assistant("How could I help you?")
+        .user("Could you tell my name?")
+        .build();
+
     let options = GenerateTextCallOptions::builder()
         .system(Some(
             "Only say hello whatever the user says. \n
             all lowercase no punctuation, prefixes, or suffixes."
                 .to_string(),
         ))
-        .messages(Some(vec![
-            Message::User(UserMessage::new("Whatsup?, Surafel is here".to_string())),
-            Message::Assistant(AssistantMessage::new("How could I help you?".to_string())),
-            Message::User(UserMessage::new("Could you tell my name?".to_string())),
-        ]))
+        .messages(Some(messages))
         .build()
         .expect("Failed to build GenerateTextCallOptions");
 
@@ -221,17 +221,15 @@ async fn test_generate_text_with_messages_and_inmessage_system_prompt() {
 
     let openai = OpenAI::new(settings);
 
+    let messages = Message::builder()
+        .system("Only say hello whatever the user says. \n all lowercase no punctuation, prefixes, or suffixes.")
+        .user("Whatsup?, Surafel is here")
+        .assistant("How could I help you?")
+        .user("Could you tell my name?")
+        .build();
+
     let options = GenerateTextCallOptions::builder()
-        .messages(Some(vec![
-            Message::System(SystemMessage::new(
-                "Only say hello whatever the user says. \n
-                all lowercase no punctuation, prefixes, or suffixes."
-                    .to_string(),
-            )),
-            Message::User(UserMessage::new("Whatsup?, Surafel is here".to_string())),
-            Message::Assistant(AssistantMessage::new("How could I help you?".to_string())),
-            Message::User(UserMessage::new("Could you tell my name?".to_string())),
-        ]))
+        .messages(Some(messages))
         .build()
         .expect("Failed to build GenerateTextCallOptions");
 
@@ -253,9 +251,7 @@ async fn test_generate_text_builder_with_both_prompt_and_messages() {
             all lowercase no punctuation, prefixes, or suffixes."
                 .to_string(),
         ))
-        .messages(Some(vec![Message::User(UserMessage::new(
-            "Whatsup?, Surafel is here".to_string(),
-        ))]))
+        .messages(Some(vec![Message::user("Whatsup?, Surafel is here")]))
         .build();
 
     assert!(options.is_err());
