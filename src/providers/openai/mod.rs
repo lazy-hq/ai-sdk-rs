@@ -38,7 +38,7 @@ impl OpenAI {
             .build()
             .expect("Failed to build OpenAIProviderSettings");
 
-        openai.into()
+        openai
     }
 
     /// OpenAI provider setting builder.
