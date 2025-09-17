@@ -33,12 +33,10 @@ pub struct OpenAI {
 impl OpenAI {
     /// Creates a new `OpenAI` provider with the given settings.
     pub fn new(model_name: impl Into<String>) -> Self {
-        let openai = OpenAIProviderSettingsBuilder::default()
+        OpenAIProviderSettingsBuilder::default()
             .model_name(model_name.into())
             .build()
-            .expect("Failed to build OpenAIProviderSettings");
-
-        openai
+            .expect("Failed to build OpenAIProviderSettings")
     }
 
     /// OpenAI provider setting builder.
