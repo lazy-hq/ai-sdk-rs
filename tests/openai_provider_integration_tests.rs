@@ -9,11 +9,11 @@ use aisdk::{
     },
     providers::openai::{OpenAI, OpenAIProviderSettings},
 };
-use aisdk_macros::tool_factory;
+use aisdk_macros::tool;
 use dotenv::dotenv;
 use futures::StreamExt;
 
-#[tool_factory]
+#[tool]
 /// Hello
 fn example_tool(a: String) -> Tool {
     Ok("".to_string())

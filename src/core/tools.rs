@@ -91,9 +91,9 @@ impl<'de> Deserialize<'de> for ToolExecute {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aisdk_macros::tool_factory;
+    use aisdk_macros::tool;
 
-    #[tool_factory]
+    #[tool]
     /// This is The Description of an example tool.
     pub fn my_example_tool(a: u8, b: Option<u8>) -> Tool {
         Ok(format!("{}{}", a, b.unwrap_or(0)))
