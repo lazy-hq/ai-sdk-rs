@@ -5,16 +5,18 @@ use aisdk::{
     core::{
         AssistantMessage, GenerateTextCallOptions, Message, SystemMessage, UserMessage,
         generate_stream, generate_text,
+        tools::{Tool, ToolExecute},
     },
     providers::openai::{OpenAI, OpenAIProviderSettings},
 };
+use aisdk_macros::tool_factory;
 use dotenv::dotenv;
 use futures::StreamExt;
-use aisdk_macros::tool_factory;
 
 #[tool_factory]
-fn example_tool() {
-    String::from("")
+/// Hello
+fn example_tool(a: String) -> Tool {
+    Ok("".to_string())
 }
 
 #[tokio::test]
@@ -264,6 +266,7 @@ async fn test_generate_text_builder_with_both_prompt_and_messages() {
         ))]))
         .build();
 
+    //println!("opt reslut 1: {:?}", options);
     assert!(options.is_err());
     match options.unwrap_err() {
         Error::InvalidInput(msg) => {
@@ -284,6 +287,7 @@ async fn test_generate_text_builder_with_no_prompt_and_messages() {
         .system(Some("You are a helpful assistant.".to_string()))
         .build();
 
+    //println!("opt reslut 1: {:?}", options);
     assert!(options.is_err());
 
     match options.unwrap_err() {

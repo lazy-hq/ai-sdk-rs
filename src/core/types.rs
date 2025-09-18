@@ -147,6 +147,24 @@ impl GenerateTextCallOptions {
 }
 
 impl GenerateTextCallOptionsBuilder {
+    pub fn build(self) -> Result<GenerateTextCallOptions> {
+        let options = self.build_inner()?;
+
+        if options.prompt.is_some() && options.messages.is_some() {
+            return Err(Error::InvalidInput(
+                "Cannot set both prompt and messages".to_string(),
+            ));
+        }
+
+        if options.messages.is_none() && options.prompt.is_none() {
+            return Err(Error::InvalidInput(
+                "Messages or prompt must be set".to_string(),
+            ));
+        }
+
+        Ok(options)
+    }
+
     pub fn with_tool(mut self, tool: Tool) -> Self {
         let mut tools = self.tools.unwrap_or_default();
         tools.push(tool);

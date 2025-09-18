@@ -1,8 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, Expr, ExprLit, FnArg, ItemFn, Lit, Meta, Pat, ReturnType};
-use schemars::{JsonSchema, Schema, schema_for};
-use serde::{Deserialize, Serialize};
+use syn::{parse_macro_input, Expr, ExprLit, FnArg, ItemFn, Lit, Meta, Pat};
 
 #[proc_macro_attribute]
 pub fn tool_factory(_attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -40,20 +38,6 @@ pub fn tool_factory(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let description = doc_comments.join("\n");
 
-    let struct_fields = inputs.iter().filter_map(|arg| {
-        if let FnArg::Typed(pat_type) = arg {
-            if let Pat::Ident(pat_ident) = &*pat_type.pat {
-                let ident = &pat_ident.ident;
-                let ty = &*pat_type.ty;
-                Some(quote! { #ident: #ty })
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    });
-
     let binding_tokens: Vec<_> = inputs.iter().filter_map(|arg| {
         if let FnArg::Typed(pat_type) = arg {
             if let Pat::Ident(pat_ident) = &*pat_type.pat {
@@ -76,29 +60,53 @@ pub fn tool_factory(_attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     }).collect();
 
+    // Generate the struct definition
+    let struct_fields = inputs.iter().filter_map(|arg| {
+        if let FnArg::Typed(pat_type) = arg {
+            if let Pat::Ident(pat_ident) = &*pat_type.pat {
+                let ident = &pat_ident.ident;
+                let ty = &*pat_type.ty;
+                Some(quote! { #ident: #ty })
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    });
+
     let expanded = quote! {
+        #[allow(unused_variables)]
         #vis fn #fn_name() -> Tool {
-            let mut tool = Tool::new();
+            // TODO: There is a possibiltiy to run schema genration during compile time here.
+            // This will potentiolly remove the need for additional runtime dependency.
+            use schemars::{schema_for, JsonSchema, Schema};
+            use serde::Serialize;
+            use std::collections::HashMap;
 
             #[derive(JsonSchema, Serialize, Debug)]
             struct ToolInput {
+                // Please add struct fields here
                 #(#struct_fields),*
             }
+
+            let input_schema = schema_for!(ToolInput);
+            // End
+
+            let mut tool = Tool::new();
 
             tool.name = stringify!(#fn_name).to_string();  // TODO: Change to better formatted text
             // than snake case
             tool.description = #description.to_string();
-            tool.input_schema = schema_for!(ToolInput);
-            tool.execute = ToolExecute::new(Box::new(|mut inp: HashMap<String, serde_json::Value>| -> Result<String> {
+            tool.input_schema = input_schema;
+            tool.execute = ToolExecute::new(Box::new(|mut inp: HashMap<String, serde_json::Value>| -> std::result::Result<String, String> {
                 // TODO: Do `input_schema` validation on inp
                 // Extract all parameters from the HashMap here
                 #(#binding_tokens)*
-                if !inp.is_empty() {
-                    return Err(Error::Other(format!("Unexpected parameters: {:?}", inp.keys().collect::<Vec<_>>())));
-                }
-                Ok(#block)
-                //Ok(format!("{:?}", result))
-            }));
+                #block
+                })
+            );
+
             tool
         }
     };

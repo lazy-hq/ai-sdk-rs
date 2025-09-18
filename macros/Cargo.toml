@@ -9,3 +9,5 @@ proc-macro = true
 [dependencies]
 syn = { version = "2.0", features = ["full", "parsing"] }
 quote = "1.0"
+serde = {version = "1.0.219", features = ["derive"]}
+schemars = "1.0.4"

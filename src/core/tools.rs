@@ -1,14 +1,14 @@
 use crate::error::{Error, Result};
-use aisdk_macros::tool_factory;
 use derive_builder::Builder;
-use schemars::{JsonSchema, Schema, schema_for};
+use schemars::Schema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 
-pub type ToolFn = Box<dyn FnMut(HashMap<String, Value>) -> Result<String> + Send + Sync>;
+pub type ToolFn =
+    Box<dyn FnMut(HashMap<String, Value>) -> std::result::Result<String, String> + Send + Sync>;
 
 #[derive(Clone)]
 pub struct ToolExecute {
@@ -18,7 +18,9 @@ pub struct ToolExecute {
 impl ToolExecute {
     pub fn call(&self, map: HashMap<String, Value>) -> Result<String> {
         let mut guard = self.inner.lock().unwrap();
-        (&mut *guard)(map)
+        (guard)(map).map_err(|e| {
+            Error::Other(e) // TODO: use tool specific errors
+        })
     }
 
     pub fn new(f: ToolFn) -> Self {
@@ -34,13 +36,14 @@ impl Default for ToolExecute {
     }
 }
 
-#[derive(Builder, Clone, Serialize, Deserialize)]
+#[derive(Builder, Clone, Serialize, Deserialize, Default)]
 #[builder(pattern = "owned", setter(into), build_fn(error = "Error"))]
 pub struct Tool {
     /// The name of the tool
     pub name: String,
     /// AI friendly description
     pub description: String,
+    /// The input schema of the tool as json schema
     pub input_schema: Schema,
     /// The output schema of the tool. AI will use this to generate outputs.
     pub execute: ToolExecute,
@@ -71,7 +74,7 @@ impl Serialize for ToolExecute {
     where
         S: serde::Serializer,
     {
-        serializer.serialize_str(&format!("ToolExecuteCall"))
+        serializer.serialize_str("ToolExecuteCall")
     }
 }
 
@@ -88,11 +91,12 @@ impl<'de> Deserialize<'de> for ToolExecute {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aisdk_macros::tool_factory;
 
     #[tool_factory]
     /// This is The Description of an example tool.
     pub fn my_example_tool(a: u8, b: Option<u8>) -> Tool {
-        format!("{}{}", a, b.unwrap_or(0))
+        Ok(format!("{}{}", a, b.unwrap_or(0)))
     }
 
     #[test]
