@@ -8,9 +8,9 @@ use async_openai::types::responses::{
 };
 use async_openai::{Client, config::OpenAIConfig};
 use futures::{StreamExt, stream::once};
-pub use settings::OpenAIProviderSettings;
 
 use crate::core::types::LanguageModelStreamResponse;
+use crate::providers::openai::settings::{OpenAIProviderSettings, OpenAIProviderSettingsBuilder};
 use crate::{
     core::{
         language_model::LanguageModel,
@@ -32,11 +32,16 @@ pub struct OpenAI {
 
 impl OpenAI {
     /// Creates a new `OpenAI` provider with the given settings.
-    pub fn new(settings: OpenAIProviderSettings) -> Self {
-        let client =
-            Client::with_config(OpenAIConfig::new().with_api_key(settings.api_key.to_string()));
+    pub fn new(model_name: impl Into<String>) -> Self {
+        OpenAIProviderSettingsBuilder::default()
+            .model_name(model_name.into())
+            .build()
+            .expect("Failed to build OpenAIProviderSettings")
+    }
 
-        Self { client, settings }
+    /// OpenAI provider setting builder.
+    pub fn builder() -> OpenAIProviderSettingsBuilder {
+        OpenAIProviderSettings::builder()
     }
 }
 

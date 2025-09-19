@@ -43,12 +43,9 @@ use aisdk::{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let settings = OpenAIProviderSettings::builder()
-        .api_key("your-api-key".to_string())
-        .model_name("gpt-4o".to_string())
-        .build()?;
 
-    let openai = OpenAI::new(settings);
+    // with default openai provider settings
+    let openai = OpenAI::new("gpt-5");
 
     let options = GenerateTextCallOptions::builder()
         .prompt("Say hello.")
@@ -71,12 +68,12 @@ use futures::StreamExt;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let settings = OpenAIProviderSettings::builder()
-        .api_key("your-api-key".to_string())
-        .model_name("gpt-4o".to_string())
-        .build()?;
 
-    let openai = OpenAI::new(settings);
+    // with custom openai provider settings
+    let openai = OpenAI::builder()
+        .api_key("your-api-key")
+        .model_name("gpt-4o")
+        .build()?;
 
     let options = GenerateTextCallOptions::builder()
         .prompt("Count from 1 to 10.")

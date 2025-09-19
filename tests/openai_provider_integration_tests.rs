@@ -7,7 +7,7 @@ use aisdk::{
         generate_stream, generate_text,
         tools::{Tool, ToolExecute},
     },
-    providers::openai::{OpenAI, OpenAIProviderSettings},
+    providers::openai::OpenAI,
 };
 use aisdk_macros::tool;
 use dotenv::dotenv;
@@ -29,14 +29,6 @@ async fn test_generate_text_with_openai() {
         return;
     }
 
-    let settings = OpenAIProviderSettings::builder()
-        .api_key(std::env::var("OPENAI_API_KEY").unwrap())
-        .model_name("gpt-4o".to_string())
-        .build()
-        .expect("Failed to build OpenAIProviderSettings");
-
-    let openai = OpenAI::new(settings);
-
     let options = GenerateTextCallOptions::builder()
         .prompt(Some(
             "Respond with exactly the word 'hello' in all lowercase.\n 
@@ -46,7 +38,7 @@ async fn test_generate_text_with_openai() {
         .build()
         .expect("Failed to build GenerateTextCallOptions");
 
-    let result = generate_text(openai, options).await;
+    let result = generate_text(OpenAI::new("gpt-4o"), options).await;
     assert!(result.is_ok());
 
     let text = result.as_ref().expect("Failed to get result").text.trim();
@@ -63,14 +55,6 @@ async fn test_generate_stream_with_openai() {
         return;
     }
 
-    let settings = OpenAIProviderSettings::builder()
-        .api_key(std::env::var("OPENAI_API_KEY").unwrap())
-        .model_name("gpt-4o".to_string())
-        .build()
-        .expect("Failed to build OpenAIProviderSettings");
-
-    let openai = OpenAI::new(settings);
-
     let options = GenerateTextCallOptions::builder()
         .prompt(Some(
             "Respond with exactly the word 'hello' in all lowercase\n 
@@ -81,7 +65,10 @@ async fn test_generate_stream_with_openai() {
         .build()
         .expect("Failed to build GenerateTextCallOptions");
 
-    let response = generate_stream(openai, options).await.unwrap();
+    let response = generate_stream(OpenAI::new("gpt-4o"), options)
+        .await
+        .unwrap();
+
     let mut stream = response.stream;
 
     let mut buf = String::new();
@@ -110,13 +97,12 @@ async fn test_generate_text_with_system_prompt() {
         return;
     }
 
-    let settings = OpenAIProviderSettings::builder()
+    // with custom openai provider settings
+    let openai = OpenAI::builder()
         .api_key(std::env::var("OPENAI_API_KEY").unwrap())
-        .model_name("gpt-4o".to_string())
+        .model_name("gpt-4o")
         .build()
         .expect("Failed to build OpenAIProviderSettings");
-
-    let openai = OpenAI::new(settings);
 
     let options = GenerateTextCallOptions::builder()
         .system(Some(
@@ -145,23 +131,22 @@ async fn test_generate_text_with_messages() {
         return;
     }
 
-    let settings = OpenAIProviderSettings::builder()
+    // with custom openai provider settings
+    let openai = OpenAI::builder()
         .api_key(std::env::var("OPENAI_API_KEY").unwrap())
-        .model_name("gpt-4o".to_string())
+        .model_name("gpt-4o")
         .build()
         .expect("Failed to build OpenAIProviderSettings");
 
-    let openai = OpenAI::new(settings);
+    let messages = Message::builder()
+        .system("You are a helpful assistant.")
+        .user("Whatsup?, Surafel is here")
+        .assistant("How could I help you?")
+        .user("Could you tell my name?")
+        .build();
 
     let options = GenerateTextCallOptions::builder()
-        .messages(Some(vec![
-            Message::System(SystemMessage::new(
-                "You are a helpful assistant.".to_string(),
-            )),
-            Message::User(UserMessage::new("Whatsup?, Surafel is here".to_string())),
-            Message::Assistant(AssistantMessage::new("How could I help you?".to_string())),
-            Message::User(UserMessage::new("Could you tell my name?".to_string())),
-        ]))
+        .messages(Some(messages))
         .build()
         .expect("Failed to build GenerateTextCallOptions");
 
@@ -182,13 +167,12 @@ async fn test_generate_text_with_messages_and_system_prompt() {
         return;
     }
 
-    let settings = OpenAIProviderSettings::builder()
-        .api_key(std::env::var("OPENAI_API_KEY").unwrap())
-        .model_name("gpt-4o".to_string())
-        .build()
-        .expect("Failed to build OpenAIProviderSettings");
-
-    let openai = OpenAI::new(settings);
+    let messages = Message::builder()
+        .system("Only say hello whatever the user says. \n all lowercase no punctuation, prefixes, or suffixes.")
+        .user("Whatsup?, Surafel is here")
+        .assistant("How could I help you?")
+        .user("Could you tell my name?")
+        .build();
 
     let options = GenerateTextCallOptions::builder()
         .system(Some(
@@ -196,15 +180,11 @@ async fn test_generate_text_with_messages_and_system_prompt() {
             all lowercase no punctuation, prefixes, or suffixes."
                 .to_string(),
         ))
-        .messages(Some(vec![
-            Message::User(UserMessage::new("Whatsup?, Surafel is here".to_string())),
-            Message::Assistant(AssistantMessage::new("How could I help you?".to_string())),
-            Message::User(UserMessage::new("Could you tell my name?".to_string())),
-        ]))
+        .messages(Some(messages))
         .build()
         .expect("Failed to build GenerateTextCallOptions");
 
-    let result = generate_text(openai, options).await;
+    let result = generate_text(OpenAI::new("gpt-4o"), options).await;
     assert!(result.is_ok());
 
     let text = result.as_ref().expect("Failed to get result").text.trim();
@@ -221,29 +201,19 @@ async fn test_generate_text_with_messages_and_inmessage_system_prompt() {
         return;
     }
 
-    let settings = OpenAIProviderSettings::builder()
-        .api_key(std::env::var("OPENAI_API_KEY").unwrap())
-        .model_name("gpt-4o".to_string())
-        .build()
-        .expect("Failed to build OpenAIProviderSettings");
-
-    let openai = OpenAI::new(settings);
+    let messages = Message::builder()
+        .system("Only say hello whatever the user says. \n all lowercase no punctuation, prefixes, or suffixes.")
+        .user("Whatsup?, Surafel is here")
+        .assistant("How could I help you?")
+        .user("Could you tell my name?")
+        .build();
 
     let options = GenerateTextCallOptions::builder()
-        .messages(Some(vec![
-            Message::System(SystemMessage::new(
-                "Only say hello whatever the user says. \n
-                all lowercase no punctuation, prefixes, or suffixes."
-                    .to_string(),
-            )),
-            Message::User(UserMessage::new("Whatsup?, Surafel is here".to_string())),
-            Message::Assistant(AssistantMessage::new("How could I help you?".to_string())),
-            Message::User(UserMessage::new("Could you tell my name?".to_string())),
-        ]))
+        .messages(Some(messages))
         .build()
         .expect("Failed to build GenerateTextCallOptions");
 
-    let result = generate_text(openai, options).await;
+    let result = generate_text(OpenAI::new("gpt-4o"), options).await;
     assert!(result.is_ok());
 
     let text = result.as_ref().expect("Failed to get result").text.trim();
@@ -261,9 +231,9 @@ async fn test_generate_text_builder_with_both_prompt_and_messages() {
             all lowercase no punctuation, prefixes, or suffixes."
                 .to_string(),
         ))
-        .messages(Some(vec![Message::User(UserMessage::new(
-            "Whatsup?, Surafel is here".to_string(),
-        ))]))
+        .messages(Some(vec![Message::User(
+            "Whatsup?, Surafel is here".into(),
+        )]))
         .build();
 
     //println!("opt reslut 1: {:?}", options);
