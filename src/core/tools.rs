@@ -36,6 +36,24 @@ impl Default for ToolExecute {
     }
 }
 
+impl Serialize for ToolExecute {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str("ToolExecuteCall")
+    }
+}
+
+impl<'de> Deserialize<'de> for ToolExecute {
+    fn deserialize<D>(_: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(Self::default())
+    }
+}
+
 #[derive(Builder, Clone, Serialize, Deserialize, Default)]
 #[builder(pattern = "owned", setter(into), build_fn(error = "Error"))]
 pub struct Tool {
@@ -69,21 +87,18 @@ impl Tool {
     }
 }
 
-impl Serialize for ToolExecute {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str("ToolExecuteCall")
-    }
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ToolList {
+    tools: Vec<Tool>,
 }
 
-impl<'de> Deserialize<'de> for ToolExecute {
-    fn deserialize<D>(_: D) -> std::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        Ok(Self::default())
+impl ToolList {
+    pub fn new(tools: Vec<Tool>) -> Self {
+        Self { tools }
+    }
+
+    pub fn add_tool(&mut self, tool: Tool) {
+        self.tools.push(tool);
     }
 }
 

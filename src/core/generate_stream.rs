@@ -42,6 +42,7 @@ pub async fn generate_stream(
                 .top_p(options.top_p)
                 .top_k(options.top_k)
                 .stop(options.stop)
+                .tools(options.tools)
                 .build()?,
         )
         .await?;

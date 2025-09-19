@@ -120,6 +120,8 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
     });
 
     let expanded = quote! {
+        // TODO: If there is a way to remove the usage of Tool and ToolExecute here it would be
+        // nice. currently the user has to import these types.
         #[allow(unused_variables)]
         #vis fn #fn_name() -> Tool {
             // TODO: There is a possibiltiy to run schema genration during compile time here.
@@ -140,7 +142,6 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
             let mut tool = Tool::new();
 
             tool.name = #name.to_string();
-            // than snake case
             tool.description = #description.to_string();
             tool.input_schema = input_schema;
             tool.execute = ToolExecute::new(Box::new(|mut inp: HashMap<String, serde_json::Value>| -> std::result::Result<String, String> {
@@ -148,8 +149,7 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 // Extract all parameters from the HashMap here
                 #(#binding_tokens)*
                 #block
-                })
-            );
+            }));
 
             tool
         }

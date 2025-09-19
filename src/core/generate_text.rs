@@ -45,6 +45,7 @@ pub async fn generate_text(
                 .top_p(options.top_p)
                 .top_k(options.top_k)
                 .stop(options.stop)
+                .tools(options.tools)
                 .build()?,
         )
         .await?;

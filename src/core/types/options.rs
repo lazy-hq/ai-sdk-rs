@@ -71,7 +71,7 @@ define_with_lm_call_options!(
     (top_p, Option<u32>, None, "Nucleus sampling."),
     (top_k, Option<u32>, None, "Top-k sampling."),
     (stop, Option<Vec<String>>, None, "Stop sequence."),
-    (tools, Vec<Tool>, vec![], "Tools to use.")
+    (tools, Option<Vec<Tool>>, None, "Tools to use.")
 );
 
 impl LanguageModelCallOptions {
@@ -114,10 +114,14 @@ impl GenerateTextCallOptionsBuilder {
     }
 
     pub fn with_tool(mut self, tool: Tool) -> Self {
-        let mut tools = self.tools.unwrap_or_default();
-        tools.push(tool);
-        self.tools = Some(tools);
-        self
+        if let Some(Some(mut tools)) = self.tools {
+            tools.push(tool);
+            self.tools = Some(Some(tools));
+            self
+        } else {
+            self.tools = Some(Some(vec![tool]));
+            self
+        }
     }
 }
 

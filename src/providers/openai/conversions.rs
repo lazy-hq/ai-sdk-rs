@@ -1,10 +1,25 @@
 //! Helper functions and conversions for the OpenAI provider.
 
 use async_openai::types::responses::{
-    CreateResponse, Input, InputContent, InputItem, InputMessage, InputMessageType, Role,
+    CreateResponse, Function, Input, InputContent, InputItem, InputMessage, InputMessageType, Role,
+    ToolDefinition,
 };
 
-use crate::core::types::{LanguageModelCallOptions, Message};
+use crate::core::{
+    tools::Tool,
+    types::{LanguageModelCallOptions, Message},
+};
+
+impl From<Tool> for ToolDefinition {
+    fn from(value: Tool) -> Self {
+        ToolDefinition::Function(Function {
+            name: value.name,
+            description: Some(value.description),
+            strict: true,
+            parameters: value.input_schema.to_value(),
+        })
+    }
+}
 
 impl From<LanguageModelCallOptions> for CreateResponse {
     fn from(options: LanguageModelCallOptions) -> Self {
@@ -27,12 +42,18 @@ impl From<LanguageModelCallOptions> for CreateResponse {
             );
         }
 
+        let tools: Option<Vec<ToolDefinition>> = options
+            .tools
+            .map(|t| t.iter().map(|t| ToolDefinition::from(t.clone())).collect());
+
         CreateResponse {
             input: Input::Items(items),
             temperature: options.temperature.map(|t| t as f32 / 100.0),
             max_output_tokens: options.max_tokens,
             stream: Some(false),
             top_p: options.top_p.map(|t| t as f32 / 100.0),
+            tools,
+            tool_choice: None,
             ..Default::default() // TODO: add support for other options
         }
     }
