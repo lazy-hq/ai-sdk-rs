@@ -133,14 +133,33 @@ impl<M: LanguageModel> GenerateOptions<M> {
     }
 }
 
-#[allow(dead_code)]
-struct GenerateOptionsBuilder<M: LanguageModel> {
+// State for GenerateOptionsBuilder
+// Following the type State builder pattern
+
+/// Initial state for setting the model
+/// returns SystemStage
+pub struct ModelStage {}
+
+/// Secondary state for including system prompt or not
+/// returns ConversationStage
+pub struct SystemStage {}
+
+/// Third state for conversation, Message or Prompt
+/// returns OptionsStage
+pub struct ConversationStage {}
+
+/// Final State for setting Options and config
+/// returns builder.build
+pub struct OptionsStage {}
+
+struct GenerateOptionsBuilder<M: LanguageModel, State = ModelStage> {
     model: Option<M>,
     prompt: Option<String>,
     options: LanguageModelOptions,
+    state: std::marker::PhantomData<State>,
 }
 
-impl<M: LanguageModel> Deref for GenerateOptionsBuilder<M> {
+impl<M: LanguageModel, State> Deref for GenerateOptionsBuilder<M, State> {
     type Target = LanguageModelOptions;
 
     fn deref(&self) -> &Self::Target {
@@ -148,44 +167,81 @@ impl<M: LanguageModel> Deref for GenerateOptionsBuilder<M> {
     }
 }
 
-impl<M: LanguageModel> DerefMut for GenerateOptionsBuilder<M> {
+impl<M: LanguageModel, State> DerefMut for GenerateOptionsBuilder<M, State> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.options
     }
 }
 
+#[allow(dead_code)]
 impl<M: LanguageModel> GenerateOptionsBuilder<M> {
     fn default() -> Self {
         GenerateOptionsBuilder {
             model: None,
             prompt: None,
             options: LanguageModelOptions::default(),
+            state: std::marker::PhantomData,
         }
     }
 }
 
 #[allow(dead_code)]
-impl<M: LanguageModel> GenerateOptionsBuilder<M> {
-    fn model(mut self, model: M) -> Self {
-        self.model = model.into();
-        self
+/// ModelStage Builder
+impl<M: LanguageModel> GenerateOptionsBuilder<M, ModelStage> {
+    pub fn model(self, model: M) -> GenerateOptionsBuilder<M, ConversationStage> {
+        GenerateOptionsBuilder {
+            model: Some(model),
+            prompt: self.prompt,
+            options: self.options,
+            state: std::marker::PhantomData,
+        }
+    }
+}
+
+#[allow(dead_code)]
+/// SystemStage Builder
+impl<M: LanguageModel> GenerateOptionsBuilder<M, SystemStage> {
+    fn system(self, system: impl Into<String>) -> GenerateOptionsBuilder<M, ConversationStage> {
+        GenerateOptionsBuilder {
+            model: self.model,
+            prompt: self.prompt,
+            options: LanguageModelOptions {
+                system: Some(system.into()),
+                ..self.options
+            },
+            state: std::marker::PhantomData,
+        }
+    }
+}
+
+#[allow(dead_code)]
+/// ConversationStage Builder
+impl<M: LanguageModel> GenerateOptionsBuilder<M, ConversationStage> {
+    fn prompt(self, prompt: impl Into<String>) -> GenerateOptionsBuilder<M, OptionsStage> {
+        GenerateOptionsBuilder {
+            model: self.model,
+            prompt: Some(prompt.into()),
+            options: self.options,
+            state: std::marker::PhantomData,
+        }
     }
 
-    fn system(mut self, system: impl Into<String>) -> Self {
-        self.system = Some(system.into());
-        self
+    fn messages(self, messages: Vec<Message>) -> GenerateOptionsBuilder<M, OptionsStage> {
+        GenerateOptionsBuilder {
+            model: self.model,
+            prompt: self.prompt,
+            options: LanguageModelOptions {
+                messages,
+                ..self.options
+            },
+            state: std::marker::PhantomData,
+        }
     }
+}
 
-    fn prompt(mut self, prompt: impl Into<String>) -> Self {
-        self.prompt = Some(prompt.into());
-        self
-    }
-
-    fn messages(mut self, messages: Vec<Message>) -> Self {
-        self.messages = messages;
-        self
-    }
-
+#[allow(dead_code)]
+/// OptionsStage Builder
+impl<M: LanguageModel> GenerateOptionsBuilder<M, OptionsStage> {
     fn seed(mut self, seed: impl Into<u32>) -> Self {
         self.seed = Some(seed.into());
         self
@@ -213,21 +269,6 @@ impl<M: LanguageModel> GenerateOptionsBuilder<M> {
 
     fn max_retries(mut self, max_retries: impl Into<u32>) -> Self {
         self.max_retries = Some(max_retries.into());
-        self
-    }
-
-    fn max_output_tokens(mut self, max_output_tokens: impl Into<u32>) -> Self {
-        self.max_output_tokens = Some(max_output_tokens.into());
-        self
-    }
-
-    fn stop_sequences(mut self, stop_sequences: impl Into<Vec<String>>) -> Self {
-        self.stop_sequences = Some(stop_sequences.into());
-        self
-    }
-
-    fn presence_penalty(mut self, presence_penalty: impl Into<f32>) -> Self {
-        self.presence_penalty = Some(presence_penalty.into());
         self
     }
 
