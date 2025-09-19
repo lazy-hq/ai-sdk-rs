@@ -49,10 +49,6 @@ impl Provider for OpenAI {}
 
 #[async_trait]
 impl LanguageModel for OpenAI {
-    fn provider_name(&self) -> &str {
-        &self.settings.provider_name
-    }
-
     async fn generate(
         &mut self,
         options: LanguageModelCallOptions,

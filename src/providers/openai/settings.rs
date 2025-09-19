@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::{error::Error, providers::openai::OpenAI};
 
-// TODO: improve the settings types to fully match the OpenAI API
 /// Settings for the OpenAI provider.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenAIProviderSettings {

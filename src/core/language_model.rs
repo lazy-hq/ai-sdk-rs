@@ -20,11 +20,6 @@ use async_trait::async_trait;
 /// generation and streaming responses.
 #[async_trait]
 pub trait LanguageModel: Send + Sync + std::fmt::Debug {
-    /// Returns the name of the provider (e.g., "openai", "anthropic").
-    ///
-    /// This helps differentiate between models with similar names from different services.
-    fn provider_name(&self) -> &str;
-
     /// Performs a single, non-streaming text generation request.
     ///
     /// This method sends a prompt to the model and returns the entire response at once.
