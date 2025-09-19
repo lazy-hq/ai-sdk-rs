@@ -69,7 +69,7 @@ impl Message {
     ///     .build();
     /// ```
     pub fn builder() -> MessageBuilder<Initial> {
-        MessageBuilder::builder()
+        MessageBuilder::default()
     }
 }
 
@@ -145,8 +145,10 @@ impl MessageBuilder {
             state: std::marker::PhantomData,
         }
     }
+}
 
-    pub fn builder() -> MessageBuilder<Initial> {
+impl Default for MessageBuilder {
+    fn default() -> Self {
         MessageBuilder {
             messages: Vec::new(),
             state: std::marker::PhantomData,
