@@ -7,7 +7,8 @@ edition = "2021"
 proc-macro = true
 
 [dependencies]
-syn = { version = "2.0", features = ["full", "parsing"] }
+proc-macro2 = "1.0.66"
+syn = { version = "2.0", features = ["full", "parsing", "extra-traits"] }
 quote = "1.0"
 serde = {version = "1.0.219", features = ["derive"]}
 schemars = "1.0.4"

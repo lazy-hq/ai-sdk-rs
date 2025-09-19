@@ -100,11 +100,11 @@ mod tests {
     }
 
     #[test]
-    fn test_macro() {
+    fn test_tool_macro_with_no_args() {
         schemars::schema_for!(String);
         let tool = my_example_tool();
 
-        assert_eq!(tool.name, "my_example_tool");
+        assert_eq!(tool.name, "my-example-tool");
         assert_eq!(
             tool.description,
             " This is The Description of an example tool."
@@ -139,6 +139,68 @@ mod tests {
                 .unwrap(),
             "10".to_string()
         );
+    }
+
+    #[tool(name = "the-name-for-this-tool")]
+    pub fn my_example_tool_with_name(name: String, a: u8, b: Option<u8>) -> Tool {
+        Ok(format!("{}{}", a, b.unwrap_or(0)))
+    }
+
+    #[test]
+    fn test_tool_macro_with_name() {
+        let tool = my_example_tool_with_name();
+        assert!(tool.name != "my-example-tool-with-name");
+        assert_eq!(tool.name, "the-name-for-this-tool");
+    }
+
+    #[tool(desc = "the-description-for-this-tool")]
+    /// This is The Description of an example tool.
+    pub fn my_example_tool_with_description(name: String, a: u8, b: Option<u8>) -> Tool {
+        Ok(format!("{}{}", a, b.unwrap_or(0)))
+    }
+
+    #[test]
+    /// This is The Description of an example tool.
+    fn test_tool_macro_with_description() {
+        let tool = my_example_tool_with_description();
+        assert!(tool.description != " This is The Description of an example tool.");
+        assert_eq!(tool.description, "the-description-for-this-tool");
+    }
+
+    #[tool(
+        name = "the-name-for-this-tool",
+        desc = "the-description-for-this-tool"
+    )]
+    /// This is The Description of an example tool.
+    pub fn my_example_tool_with_name_and_description(name: String, a: u8, b: Option<u8>) -> Tool {
+        Ok(format!("{}{}", a, b.unwrap_or(0)))
+    }
+
+    #[test]
+    fn test_tool_macro_with_name_and_description() {
+        let tool = my_example_tool_with_name_and_description();
+        assert!(tool.name != "my-example-tool-with-name-and-description");
+        assert_eq!(tool.name, "the-name-for-this-tool");
+        assert!(tool.description != " This is The Description of an example tool.");
+        assert_eq!(tool.description, "the-description-for-this-tool");
+    }
+
+    #[tool(
+        desc = "the-description-for-this-tool",
+        name = "the-name-for-this-tool"
+    )]
+    /// This is The Description of an example tool.
+    pub fn my_example_tool_with_description_and_name(name: String, a: u8, b: Option<u8>) -> Tool {
+        Ok(format!("{}{}", a, b.unwrap_or(0)))
+    }
+
+    #[test]
+    fn test_tool_macro_with_description_and_name() {
+        let tool = my_example_tool_with_description_and_name();
+        assert!(tool.name != "my-example-tool-with-description-and-name");
+        assert_eq!(tool.name, "the-name-for-this-tool");
+        assert!(tool.description != " This is The Description of an example tool.");
+        assert_eq!(tool.description, "the-description-for-this-tool");
     }
 
     #[test]

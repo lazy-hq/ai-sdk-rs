@@ -1,6 +1,10 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, Expr, ExprLit, FnArg, ItemFn, Lit, Meta, Pat};
+use syn::parse::Parser;
+use syn::{
+    parse_macro_input, punctuated::Punctuated, Expr, ExprLit, FnArg, ItemFn, Lit, Meta,
+    MetaNameValue, Pat, Token,
+};
 
 #[proc_macro_attribute]
 pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -10,33 +14,73 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let block = &input_fn.block;
     let inputs = &input_fn.sig.inputs;
     let attrs = &input_fn.attrs;
+    let args_parser = Punctuated::<MetaNameValue, Token![,]>::parse_terminated; // TODO: better
+                                                                                // parsing with better error
+                                                                                // messages might be good here
+    let args = args_parser.parse(_attr);
 
-    // Extract doc comments
-    let doc_comments: Vec<String> = attrs
-        .iter()
-        .filter_map(|attr| {
-            if attr.path().is_ident("doc") {
-                if let Meta::NameValue(meta_name_value) = &attr.meta {
-                    if let Expr::Lit(ExprLit {
-                        lit: Lit::Str(lit_str),
-                        ..
-                    }) = &meta_name_value.value
-                    {
-                        let doc = lit_str.value();
-                        Some(doc)
+    let (name_arg, description_arg) = if let Ok(args) = args {
+        let mut name: Option<String> = None;
+        let mut description: Option<String> = None;
+
+        for arg in args {
+            if arg.path.is_ident("desc") {
+                if let Expr::Lit(lit) = &arg.value {
+                    if let Lit::Str(str_lit) = &lit.lit {
+                        description = Some(str_lit.value());
+                    }
+                }
+            } else if arg.path.is_ident("name") {
+                if let Expr::Lit(lit) = &arg.value {
+                    if let Lit::Str(str_lit) = &lit.lit {
+                        name = Some(str_lit.value());
+                    }
+                }
+            }
+        }
+
+        (name, description)
+    } else {
+        //println!("Failed to parse args");
+        (None, None)
+    };
+
+    let description = if let Some(desc) = description_arg {
+        desc
+    } else {
+        // Extract doc comments
+        let doc_comments: Vec<String> = attrs
+            .iter()
+            .filter_map(|attr| {
+                if attr.path().is_ident("doc") {
+                    if let Meta::NameValue(meta_name_value) = &attr.meta {
+                        if let Expr::Lit(ExprLit {
+                            lit: Lit::Str(lit_str),
+                            ..
+                        }) = &meta_name_value.value
+                        {
+                            let doc = lit_str.value();
+                            Some(doc)
+                        } else {
+                            None
+                        }
                     } else {
                         None
                     }
                 } else {
                     None
                 }
-            } else {
-                None
-            }
-        })
-        .collect();
+            })
+            .collect();
 
-    let description = doc_comments.join("\n");
+        doc_comments.join("\n")
+    };
+
+    let name = if let Some(name) = name_arg {
+        name
+    } else {
+        fn_name.to_string().replace("_", "-")
+    };
 
     let binding_tokens: Vec<_> = inputs.iter().filter_map(|arg| {
         if let FnArg::Typed(pat_type) = arg {
@@ -95,7 +139,7 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
             let mut tool = Tool::new();
 
-            tool.name = stringify!(#fn_name).to_string();  // TODO: Change to better formatted text
+            tool.name = #name.to_string();
             // than snake case
             tool.description = #description.to_string();
             tool.input_schema = input_schema;
