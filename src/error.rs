@@ -42,6 +42,11 @@ pub enum Error {
     #[cfg(feature = "openai")]
     #[error("OpenAI error: {0}")]
     OpenAIError(#[from] async_openai::error::OpenAIError),
+
+    /// Anthropic provider error.
+    #[cfg(feature = "anthropic")]
+    #[error("Anthropic error: {0}")]
+    AnthropicError(#[from] reqwest::Error),
 }
 
 /// Implements `From` for `UninitializedFieldError` to convert it to `Error`.

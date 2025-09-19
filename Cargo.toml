@@ -11,12 +11,17 @@ keywords = ["ai", "sdk", "aisdk", "ai-sdk-rs", "openai"]
 categories = ["api-bindings", "asynchronous"]
 
 [features]
-full = ["openai"]
+full = ["openai", "anthropic"]
 openai = ["async-openai"]
+anthropic = ["reqwest"]
 
 [[test]]
 name = "openai_provider_integration_tests"
 required-features = ["openai"]
+
+[[test]]
+name = "anthropic_provider_integration_tests"
+required-features = ["anthropic"]
 
 [dependencies]
 tera = "1"
@@ -29,6 +34,7 @@ thiserror = "2.0.12"
 derive_builder = "0.20.2"
 futures = "0.3"
 async-openai = { version = "0.29.3", optional = true }
+reqwest = { version = "0.12", features = ["json", "stream"], optional = true }
 
 [dev-dependencies]
 cargo-husky = { version = "1", features = ["precommit-hook", "run-cargo-test", "run-cargo-clippy", "run-cargo-fmt"] }
