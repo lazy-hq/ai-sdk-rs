@@ -220,7 +220,9 @@ async fn test_generate_text_builder_with_both_prompt_and_messages() {
             all lowercase no punctuation, prefixes, or suffixes."
                 .to_string(),
         ))
-        .messages(Some(vec![Message::user("Whatsup?, Surafel is here")]))
+        .messages(Some(vec![Message::User(
+            "Whatsup?, Surafel is here".into(),
+        )]))
         .build();
 
     assert!(options.is_err());

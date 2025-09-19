@@ -1,4 +1,4 @@
-use crate::core::{Message, SystemMessage, UserMessage};
+use crate::core::Message;
 
 /// Resolves the message to be used for text generation.
 ///
@@ -12,10 +12,8 @@ pub fn resolve_message(
 ) -> (String, Vec<Message>) {
     let messages = messages.unwrap_or_else(|| {
         vec![
-            Message::System(SystemMessage::new(
-                system_prompt.to_owned().unwrap_or_default(),
-            )),
-            Message::User(UserMessage::new(prompt.unwrap_or_default())),
+            Message::System(system_prompt.to_owned().unwrap_or_default().into()),
+            Message::User(prompt.unwrap_or_default().into()),
         ]
     });
 

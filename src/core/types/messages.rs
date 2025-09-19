@@ -17,21 +17,6 @@ pub enum Message {
 }
 
 impl Message {
-    /// Create a new user message.
-    pub fn user(content: impl Into<String>) -> Self {
-        Self::User(UserMessage::new(content))
-    }
-
-    /// Create a new assistant message.
-    pub fn assistant(content: impl Into<String>) -> Self {
-        Self::Assistant(AssistantMessage::new(content))
-    }
-
-    /// Create a new system message.
-    pub fn system(content: impl Into<String>) -> Self {
-        Self::System(SystemMessage::new(content))
-    }
-
     /// Start a new conversation with an empty message list.
     ///
     /// Returns a `MessageBuilder<Conversation>`, allowing any number of
@@ -89,6 +74,18 @@ impl SystemMessage {
     }
 }
 
+impl From<String> for SystemMessage {
+    fn from(value: String) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<&str> for SystemMessage {
+    fn from(value: &str) -> Self {
+        Self::new(value)
+    }
+}
+
 /// User model message.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserMessage {
@@ -105,6 +102,17 @@ impl UserMessage {
     }
 }
 
+impl From<String> for UserMessage {
+    fn from(value: String) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<&str> for UserMessage {
+    fn from(value: &str) -> Self {
+        Self::new(value)
+    }
+}
 /// Assistant model message.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssistantMessage {
@@ -118,6 +126,12 @@ impl AssistantMessage {
             role: Role::Assistant,
             content: content.into(),
         }
+    }
+}
+
+impl From<String> for AssistantMessage {
+    fn from(value: String) -> Self {
+        Self::new(value)
     }
 }
 
@@ -164,8 +178,7 @@ impl<State> MessageBuilder<State> {
 
 impl MessageBuilder<Initial> {
     pub fn system(mut self, content: impl Into<String>) -> MessageBuilder<Conversation> {
-        self.messages
-            .push(Message::System(SystemMessage::new(content)));
+        self.messages.push(Message::System(content.into().into()));
         MessageBuilder {
             messages: self.messages,
             state: std::marker::PhantomData,
@@ -173,7 +186,7 @@ impl MessageBuilder<Initial> {
     }
 
     pub fn user(mut self, content: impl Into<String>) -> MessageBuilder<Conversation> {
-        self.messages.push(Message::User(UserMessage::new(content)));
+        self.messages.push(Message::User(content.into().into()));
         MessageBuilder {
             messages: self.messages,
             state: std::marker::PhantomData,
@@ -183,7 +196,7 @@ impl MessageBuilder<Initial> {
 
 impl MessageBuilder<Conversation> {
     pub fn user(mut self, content: impl Into<String>) -> MessageBuilder<Conversation> {
-        self.messages.push(Message::User(UserMessage::new(content)));
+        self.messages.push(Message::User(content.into().into()));
         MessageBuilder {
             messages: self.messages,
             state: std::marker::PhantomData,
@@ -191,7 +204,7 @@ impl MessageBuilder<Conversation> {
     }
     pub fn assistant(mut self, content: impl Into<String>) -> MessageBuilder<Conversation> {
         self.messages
-            .push(Message::Assistant(AssistantMessage::new(content)));
+            .push(Message::Assistant(content.into().into()));
         MessageBuilder {
             messages: self.messages,
             state: std::marker::PhantomData,
