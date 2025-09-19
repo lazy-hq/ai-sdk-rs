@@ -105,10 +105,9 @@ struct GoogleStreamEvent {
     candidates: Option<Vec<GoogleCandidate>>,
 }
 
-// Helper struct for shared Google stream parsing logic
-struct GoogleStreamParser;
+struct Google;
 
-impl GoogleStreamParser {
+impl Google {
     async fn parse_stream_response(
         response: reqwest::Response,
         model_name: &str,
@@ -241,7 +240,7 @@ impl LanguageModel for GoogleGenerativeAI {
             .send()
             .await?;
 
-        GoogleStreamParser::parse_stream_response(response, &self.settings.model_name).await
+        Google::parse_stream_response(response, &self.settings.model_name).await
     }
 }
 
@@ -347,6 +346,6 @@ impl LanguageModel for VertexAI {
             .send()
             .await?;
 
-        GoogleStreamParser::parse_stream_response(response, &self.settings.model_name).await
+        Google::parse_stream_response(response, &self.settings.model_name).await
     }
 }
