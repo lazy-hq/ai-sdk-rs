@@ -217,7 +217,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | --------------- | --------------- | --------------- | --------------- | --------------- | --------------- |
 | OpenAI          | ✅              | ✅              | ✅              | NA              | ✅              |
 | Anthropic       | ✅              | ✅              | ✅              | ✅              | ✅              |
-| Google          | ✅              | NA              | NA              | NA              | NA              |
+| Google          | ✅              | ✅              | ✅              | ✅              | ✅              |
 
 
 ### Prompts

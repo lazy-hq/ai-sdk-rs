@@ -48,6 +48,10 @@ impl From<LanguageModelCallOptions> for AnthropicRequest {
             messages,
             system,
             stream: None,
+            temperature: options.temperature,
+            top_p: options.top_p,
+            top_k: options.top_k,
+            stop_sequences: options.stop,
         }
     }
 }

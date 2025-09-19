@@ -63,6 +63,14 @@ struct AnthropicRequest {
     system: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     stream: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    top_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    top_k: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stop_sequences: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]

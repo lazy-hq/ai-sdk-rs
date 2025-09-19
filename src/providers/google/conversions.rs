@@ -55,12 +55,27 @@ impl From<LanguageModelCallOptions> for GoogleRequest {
             });
         }
 
+        let generation_config = if options.max_tokens.is_some()
+            || options.temperature.is_some()
+            || options.top_p.is_some()
+            || options.top_k.is_some()
+            || options.stop.is_some()
+        {
+            Some(GoogleGenerationConfig {
+                max_output_tokens: options.max_tokens,
+                temperature: options.temperature,
+                top_p: options.top_p,
+                top_k: options.top_k,
+                stop_sequences: options.stop,
+            })
+        } else {
+            None
+        };
+
         GoogleRequest {
             contents,
             system_instruction,
-            generation_config: options.max_tokens.map(|max_tokens| GoogleGenerationConfig {
-                max_output_tokens: Some(max_tokens),
-            }),
+            generation_config,
         }
     }
 }

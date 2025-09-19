@@ -68,6 +68,14 @@ struct GoogleSystemInstruction {
 struct GoogleGenerationConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     max_output_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    top_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    top_k: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stop_sequences: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -43,15 +43,10 @@ pub enum Error {
     #[error("OpenAI error: {0}")]
     OpenAIError(#[from] async_openai::error::OpenAIError),
 
-    /// Anthropic provider error.
-    #[cfg(feature = "anthropic")]
-    #[error("Anthropic error: {0}")]
-    AnthropicError(#[from] reqwest::Error),
-
-    /// Google provider error.
-    #[cfg(feature = "google")]
-    #[error("Google error: {0}")]
-    GoogleError(#[from] reqwest::Error),
+    /// HTTP request error (used by Anthropic and Google providers).
+    #[cfg(any(feature = "anthropic", feature = "google"))]
+    #[error("HTTP request error: {0}")]
+    HttpError(#[from] reqwest::Error),
 
     /// JSON parsing error.
     #[error("JSON parsing error: {0}")]
