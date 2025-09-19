@@ -1,76 +1,11 @@
-//! Core types for AI SDK functions.
+//! Options for AI SDK functions and traits.
 
 use derive_builder::Builder;
-use futures::Stream;
 use serde::{Deserialize, Serialize};
-use std::pin::Pin;
 
 use crate::core::tools::Tool;
+use crate::core::types::messages::Message;
 use crate::error::{Error, Result};
-
-/// Role for model messages.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Role {
-    System,
-    User,
-    Assistant,
-}
-
-/// Message Type for model messages.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Message {
-    System(SystemMessage),
-    User(UserMessage),
-    Assistant(AssistantMessage),
-}
-
-/// System model message.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SystemMessage {
-    role: Role,
-    pub content: String,
-}
-
-impl SystemMessage {
-    pub fn new(content: impl Into<String>) -> Self {
-        Self {
-            role: Role::System,
-            content: content.into(),
-        }
-    }
-}
-
-/// User model message.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UserMessage {
-    role: Role,
-    pub content: String,
-}
-
-impl UserMessage {
-    pub fn new(content: impl Into<String>) -> Self {
-        Self {
-            role: Role::User,
-            content: content.into(),
-        }
-    }
-}
-
-/// Assistant model message.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AssistantMessage {
-    role: Role,
-    pub content: String,
-}
-
-impl AssistantMessage {
-    pub fn new(content: impl Into<String>) -> Self {
-        Self {
-            role: Role::Assistant,
-            content: content.into(),
-        }
-    }
-}
 
 /// Shortens the definition of the `GenerateTextCallOptions` and
 /// `LanguageModelCallOptions` because all the fields from the first are also
@@ -139,6 +74,19 @@ define_with_lm_call_options!(
     (tools, Vec<Tool>, vec![], "Tools to use.")
 );
 
+impl LanguageModelCallOptions {
+    /// Creates a new builder for `LanguageModelCallOptions`.
+    pub fn builder() -> LanguageModelCallOptionsBuilder {
+        LanguageModelCallOptionsBuilder::default()
+    }
+}
+
+/*
+ *CORE function options
+ */
+
+/*Generate Text Options and builder*/
+
 impl GenerateTextCallOptions {
     /// Creates a new builder for `GenerateTextCallOptions`.
     pub fn builder() -> GenerateTextCallOptionsBuilder {
@@ -173,70 +121,7 @@ impl GenerateTextCallOptionsBuilder {
     }
 }
 
-/// Response from a `generate_text` call.
-#[derive(Debug)]
-pub struct GenerateTextResponse {
-    /// The generated text.
-    pub text: String,
-}
+/*Stream Text Options and builder*/
 
-impl GenerateTextResponse {
-    /// Creates a new response with the generated text.
-    pub fn new(text: impl Into<String>) -> Self {
-        Self { text: text.into() }
-    }
-}
-
-impl LanguageModelCallOptions {
-    /// Creates a new builder for `LanguageModelCallOptions`.
-    pub fn builder() -> LanguageModelCallOptionsBuilder {
-        LanguageModelCallOptionsBuilder::default()
-    }
-}
-
-/// Response from a `generate_stream` call.
-pub struct LanguageModelStreamResponse {
-    /// A stream of responses from the language model.
-    pub stream: StreamChunk,
-
-    /// The model that generated the response.
-    pub model: Option<String>,
-}
-
-// TODO: constract a standard response type
-/// Response from a language model.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LanguageModelResponse {
-    /// The generated text.
-    pub text: String,
-
-    /// The model that generated the response.
-    pub model: Option<String>,
-
-    /// The reason the model stopped generating text.
-    pub stop_reason: Option<String>,
-}
-
-impl LanguageModelResponse {
-    /// Creates a new response with the generated text.
-    pub fn new(text: impl Into<String>) -> Self {
-        Self {
-            text: text.into(),
-            model: None,
-            stop_reason: None,
-        }
-    }
-}
-
-/// Stream of responses from a language model's streaming API mapped to a common
-/// interface.
-pub type StreamChunk = Pin<Box<dyn Stream<Item = Result<StreamChunkData>> + Send>>;
-
-/// Chunked response from a language model.
-pub struct StreamChunkData {
-    /// The generated text.
-    pub text: String,
-
-    /// The reason the model stopped generating text.
-    pub stop_reason: Option<String>,
-}
+//TODO: add separate options for generate_stream and generate_text, currently they are using the
+//same GenerateTextCallOptions
