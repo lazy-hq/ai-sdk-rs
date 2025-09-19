@@ -47,6 +47,15 @@ pub enum Error {
     #[cfg(feature = "anthropic")]
     #[error("Anthropic error: {0}")]
     AnthropicError(#[from] reqwest::Error),
+
+    /// Google provider error.
+    #[cfg(feature = "google")]
+    #[error("Google error: {0}")]
+    GoogleError(#[from] reqwest::Error),
+
+    /// JSON parsing error.
+    #[error("JSON parsing error: {0}")]
+    JsonError(#[from] serde_json::Error),
 }
 
 /// Implements `From` for `UninitializedFieldError` to convert it to `Error`.

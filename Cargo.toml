@@ -11,9 +11,10 @@ keywords = ["ai", "sdk", "aisdk", "ai-sdk-rs", "openai"]
 categories = ["api-bindings", "asynchronous"]
 
 [features]
-full = ["openai", "anthropic"]
+full = ["openai", "anthropic", "google"]
 openai = ["async-openai"]
 anthropic = ["reqwest"]
+google = ["reqwest"]
 
 [[test]]
 name = "openai_provider_integration_tests"
@@ -22,6 +23,10 @@ required-features = ["openai"]
 [[test]]
 name = "anthropic_provider_integration_tests"
 required-features = ["anthropic"]
+
+[[test]]
+name = "google_provider_integration_tests"
+required-features = ["google"]
 
 [dependencies]
 tera = "1"
