@@ -11,7 +11,7 @@ An open-source Rust library for building AI-powered applications, inspired by th
 
 ## Key Features
 
-- **Multi-Provider Support**: OpenAI and Anthropic providers with text generation and streaming.
+- **Multi-Provider Support**: OpenAI, Anthropic, and Google providers with text generation and streaming.
 - **Type-Safe API**: Built with Rust's type system for reliability.
 - **Asynchronous**: Uses Tokio for async operations.
 - **Prompt Templating**: Filesystem-based prompts using Tera templates (coming soon).
@@ -33,6 +33,9 @@ aisdk = { version = "0.1.0", features = ["openai"] }
 
 # For Anthropic only  
 aisdk = { version = "0.1.0", features = ["anthropic"] }
+
+# For Google only
+aisdk = { version = "0.1.0", features = ["google"] }
 
 # For all providers
 aisdk = { version = "0.1.0", features = ["full"] }
@@ -149,6 +152,62 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+### Google Generative AI Provider
+
+```rust
+use aisdk::{
+    core::{GenerateTextCallOptions, generate_text},
+    providers::google::GoogleGenerativeAI,
+};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // with default google generative ai provider settings
+    let google_ai = GoogleGenerativeAI::new("gemini-1.5-flash");
+
+    let options = GenerateTextCallOptions::builder()
+        .prompt("Explain machine learning in simple terms.")
+        .build()?;
+
+    let result = generate_text(google_ai, options).await?;
+    println!("{}", result.text);
+    Ok(())
+}
+```
+
+### Google Vertex AI Provider
+
+```rust
+use aisdk::{
+    core::{GenerateTextCallOptions, generate_stream},
+    providers::google::VertexAI,
+};
+use futures::StreamExt;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // with custom vertex ai provider settings
+    let vertex_ai = VertexAI::builder()
+        .project_id("your-project-id")
+        .location("us-central1")
+        .model_name("gemini-1.5-flash")
+        .build()?;
+
+    let options = GenerateTextCallOptions::builder()
+        .system("You are a helpful assistant.")
+        .prompt("Write a Python function to sort a list.")
+        .build()?;
+
+    let mut stream = generate_stream(vertex_ai, options).await?;
+    while let Some(chunk) = stream.stream.next().await {
+        if let Ok(data) = chunk {
+            print!("{}", data.text);
+        }
+    }
+    Ok(())
+}
+```
+
 ### Providers
 
 - **Yes**: ✅
@@ -158,6 +217,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | --------------- | --------------- | --------------- | --------------- | --------------- | --------------- |
 | OpenAI          | ✅              | ✅              | ✅              | NA              | ✅              |
 | Anthropic       | ✅              | ✅              | ✅              | ✅              | ✅              |
+| Google          | ✅              | NA              | NA              | NA              | NA              |
 
 
 ### Prompts
@@ -169,7 +229,7 @@ The file in `./prompts` contains various example prompt files to demonstrate the
 - **Tokio**: Async runtime.
 - **Tera**: Template engine for prompts.
 - **async-openai**: Official community SDK for OpenAI API.
-- **reqwest**: Direct HTTP client for Anthropic API (no external SDK).
+- **reqwest**: Direct HTTP client for Anthropic and Google APIs (no external SDKs).
 
 ## Contributing
 
