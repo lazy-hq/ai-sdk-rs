@@ -4,11 +4,6 @@
 pub mod conversions;
 pub mod settings;
 
-use futures::StreamExt;
-use reqwest::Client;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-
 use crate::core::types::LanguageModelStreamResponse;
 use crate::providers::anthropic::settings::{
     AnthropicProviderSettings, AnthropicProviderSettingsBuilder,
@@ -22,6 +17,11 @@ use crate::{
     error::Result,
 };
 use async_trait::async_trait;
+use futures::StreamExt;
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 /// The Anthropic provider.
 #[derive(Debug, Serialize)]
@@ -47,6 +47,45 @@ impl Anthropic {
 }
 
 impl Provider for Anthropic {}
+
+impl Anthropic {
+    fn parse_sse_event(event_text: &str) -> Option<Result<StreamChunkData>> {
+        let data_str = event_text
+            .lines()
+            .find_map(|line| line.strip_prefix("data: "))
+            .map(str::trim)?;
+
+        if data_str == "[DONE]" {
+            return Some(Ok(StreamChunkData {
+                text: String::new(),
+                stop_reason: Some("stop".to_string()),
+            }));
+        }
+
+        if let Ok(event) = serde_json::from_str::<AnthropicStreamEvent>(data_str)
+            && event.event_type == "content_block_delta"
+            && let Some(delta) = event.data.get("delta")
+            && let Some(text) = delta.get("text")
+            && let Some(text_str) = text.as_str()
+        {
+            return Some(Ok(StreamChunkData {
+                text: text_str.to_string(),
+                stop_reason: None,
+            }));
+        }
+
+        if let Ok(event) = serde_json::from_str::<AnthropicStreamEvent>(data_str)
+            && event.event_type == "message_stop"
+        {
+            return Some(Ok(StreamChunkData {
+                text: String::new(),
+                stop_reason: Some("stop".to_string()),
+            }));
+        }
+
+        None
+    }
+}
 
 #[derive(Debug, Serialize)]
 struct AnthropicMessage {
@@ -116,9 +155,13 @@ impl LanguageModel for Anthropic {
             .content
             .iter()
             .filter(|c| c.content_type == "text")
-            .map(|c| c.text.as_str())
-            .collect::<Vec<_>>()
-            .join(" ");
+            .fold(String::new(), |mut acc, c| {
+                if !acc.is_empty() {
+                    acc.push(' ');
+                }
+                acc.push_str(&c.text);
+                acc
+            });
 
         Ok(LanguageModelResponse {
             model: Some(response.model),
@@ -145,41 +188,32 @@ impl LanguageModel for Anthropic {
             .send()
             .await?;
 
-        let stream = response
-            .bytes_stream()
-            .map(|chunk_result| match chunk_result {
+        let buffer = Arc::new(Mutex::new(String::new()));
+
+        let stream = response.bytes_stream().map(move |chunk_result| {
+            match chunk_result {
                 Ok(chunk) => {
-                    let text = String::from_utf8_lossy(&chunk);
-                    if text.starts_with("data: ") {
-                        let json_str = text.strip_prefix("data: ").unwrap_or(&text).trim();
-                        if json_str == "[DONE]" {
-                            return Ok(StreamChunkData {
-                                text: String::new(),
-                                stop_reason: Some("stop".to_string()),
-                            });
+                    let mut buffer_guard = buffer.lock().unwrap();
+                    buffer_guard.push_str(&String::from_utf8_lossy(&chunk));
+
+                    // Process complete SSE events (separated by double newlines)
+                    while let Some(event_end) = buffer_guard.find("\n\n") {
+                        let event_text = &buffer_guard[..event_end];
+                        if let Some(chunk_data) = Self::parse_sse_event(event_text) {
+                            buffer_guard.drain(..event_end + 2);
+                            return chunk_data;
                         }
-                        if let Ok(event) = serde_json::from_str::<AnthropicStreamEvent>(json_str) {
-                            if event.event_type == "content_block_delta" {
-                                if let Some(delta) = event.data.get("delta") {
-                                    if let Some(text) = delta.get("text") {
-                                        if let Some(text_str) = text.as_str() {
-                                            return Ok(StreamChunkData {
-                                                text: text_str.to_string(),
-                                                stop_reason: None,
-                                            });
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        buffer_guard.drain(..event_end + 2);
                     }
+
                     Ok(StreamChunkData {
                         text: String::new(),
                         stop_reason: None,
                     })
                 }
                 Err(e) => Err(e.into()),
-            });
+            }
+        });
 
         Ok(LanguageModelStreamResponse {
             stream: Box::pin(stream),
