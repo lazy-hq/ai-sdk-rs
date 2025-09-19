@@ -66,8 +66,8 @@ define_with_lm_call_options!(
         None,
         "The maximum number of tokens to generate."
     ),
-    (temperature, Option<u32>, None, "Randomness."),
-    (top_p, Option<u32>, None, "Nucleus sampling."),
+    (temperature, Option<f32>, None, "Randomness."),
+    (top_p, Option<f32>, None, "Nucleus sampling."),
     (top_k, Option<u32>, None, "Top-k sampling."),
     (stop, Option<Vec<String>>, None, "Stop sequence.")
 );

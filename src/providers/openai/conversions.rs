@@ -29,10 +29,10 @@ impl From<LanguageModelCallOptions> for CreateResponse {
 
         CreateResponse {
             input: Input::Items(items),
-            temperature: options.temperature.map(|t| t as f32 / 100.0),
+            temperature: options.temperature,
             max_output_tokens: options.max_tokens,
             stream: Some(false),
-            top_p: options.top_p.map(|t| t as f32 / 100.0),
+            top_p: options.top_p,
             ..Default::default() // TODO: add support for other options
         }
     }

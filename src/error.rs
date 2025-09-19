@@ -42,6 +42,15 @@ pub enum Error {
     #[cfg(feature = "openai")]
     #[error("OpenAI error: {0}")]
     OpenAIError(#[from] async_openai::error::OpenAIError),
+
+    /// HTTP request error (used by Anthropic and Google providers).
+    #[cfg(any(feature = "anthropic", feature = "google"))]
+    #[error("HTTP request error: {0}")]
+    HttpError(#[from] reqwest::Error),
+
+    /// JSON parsing error.
+    #[error("JSON parsing error: {0}")]
+    JsonError(#[from] serde_json::Error),
 }
 
 /// Implements `From` for `UninitializedFieldError` to convert it to `Error`.

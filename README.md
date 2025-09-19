@@ -11,7 +11,7 @@ An open-source Rust library for building AI-powered applications, inspired by th
 
 ## Key Features
 
-- **OpenAI Provider Support**: Initial support for OpenAI models with text generation and streaming.
+- **Multi-Provider Support**: OpenAI, Anthropic, and Google providers with text generation and streaming.
 - **Type-Safe API**: Built with Rust's type system for reliability.
 - **Asynchronous**: Uses Tokio for async operations.
 - **Prompt Templating**: Filesystem-based prompts using Tera templates (coming soon).
@@ -25,10 +25,20 @@ Add `aisdk` to your `Cargo.toml`:
 aisdk = "0.1.0"
 ```
 
-Enable the OpenAI feature:
+Enable specific provider features:
 
 ```toml
+# For OpenAI only
 aisdk = { version = "0.1.0", features = ["openai"] }
+
+# For Anthropic only  
+aisdk = { version = "0.1.0", features = ["anthropic"] }
+
+# For Google only
+aisdk = { version = "0.1.0", features = ["google"] }
+
+# For all providers
+aisdk = { version = "0.1.0", features = ["full"] }
 ```
 
 ## Usage
@@ -87,16 +97,127 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+### Anthropic Provider
 
+```rust
+use aisdk::{
+    core::{GenerateTextCallOptions, generate_text},
+    providers::anthropic::Anthropic,
+};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // with default anthropic provider settings
+    let anthropic = Anthropic::new("claude-4-sonnet");
+
+    let options = GenerateTextCallOptions::builder()
+        .prompt("Explain quantum computing in simple terms.")
+        .build()?;
+
+    let result = generate_text(anthropic, options).await?;
+    println!("{}", result.text);
+    Ok(())
+}
+```
+
+### Anthropic Streaming
+
+```rust
+use aisdk::{
+    core::{GenerateTextCallOptions, generate_stream},
+    providers::anthropic::Anthropic,
+};
+use futures::StreamExt;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // with custom anthropic provider settings
+    let anthropic = Anthropic::builder()
+        .api_key("your-api-key")
+        .model_name("claude-4-sonnet")
+        .build()?;
+
+    let options = GenerateTextCallOptions::builder()
+        .system("You are a helpful coding assistant.")
+        .prompt("Write a Rust function to calculate fibonacci numbers.")
+        .build()?;
+
+    let mut stream = generate_stream(anthropic, options).await?;
+    while let Some(chunk) = stream.stream.next().await {
+        if let Ok(data) = chunk {
+            print!("{}", data.text);
+        }
+    }
+    Ok(())
+}
+```
+
+### Google Generative AI Provider
+
+```rust
+use aisdk::{
+    core::{GenerateTextCallOptions, generate_text},
+    providers::google::GoogleGenerativeAI,
+};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // with default google generative ai provider settings
+    let google_ai = GoogleGenerativeAI::new("gemini-1.5-flash");
+
+    let options = GenerateTextCallOptions::builder()
+        .prompt("Explain machine learning in simple terms.")
+        .build()?;
+
+    let result = generate_text(google_ai, options).await?;
+    println!("{}", result.text);
+    Ok(())
+}
+```
+
+### Google Vertex AI Provider
+
+```rust
+use aisdk::{
+    core::{GenerateTextCallOptions, generate_stream},
+    providers::google::VertexAI,
+};
+use futures::StreamExt;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // with custom vertex ai provider settings
+    let vertex_ai = VertexAI::builder()
+        .project_id("your-project-id")
+        .location("us-central1")
+        .model_name("gemini-1.5-flash")
+        .build()?;
+
+    let options = GenerateTextCallOptions::builder()
+        .system("You are a helpful assistant.")
+        .prompt("Write a Python function to sort a list.")
+        .build()?;
+
+    let mut stream = generate_stream(vertex_ai, options).await?;
+    while let Some(chunk) = stream.stream.next().await {
+        if let Ok(data) = chunk {
+            print!("{}", data.text);
+        }
+    }
+    Ok(())
+}
+```
 
 ### Providers
 
 - **Yes**: ✅
 - **NA**: Not Applicable
 
-| Model/Input     | Max Tokens      | Temprature      | Top P           | Top K           | Stop            |
+| Model/Input     | Max Tokens      | Temperature     | Top P           | Top K           | Stop            |
 | --------------- | --------------- | --------------- | --------------- | --------------- | --------------- |
-| OpenAi          | ✅              | ✅              | ✅              | NA              | ✅              |
+| OpenAI          | ✅              | ✅              | ✅              | NA              | ✅              |
+| Anthropic       | ✅              | ✅              | ✅              | ✅              | ✅              |
+| Google          | ✅              | ✅              | ✅              | ✅              | ✅              |
 
 
 ### Prompts
@@ -107,7 +228,8 @@ The file in `./prompts` contains various example prompt files to demonstrate the
 - **Rust**: Core language.
 - **Tokio**: Async runtime.
 - **Tera**: Template engine for prompts.
-- **async-openai**: OpenAI API client.
+- **async-openai**: Official community SDK for OpenAI API.
+- **reqwest**: Direct HTTP client for Anthropic and Google APIs (no external SDKs).
 
 ## Contributing
 
