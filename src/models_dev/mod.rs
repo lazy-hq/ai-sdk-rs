@@ -10,7 +10,22 @@ pub mod client;
 pub mod error;
 
 #[cfg(feature = "models-dev")]
+pub mod types;
+
+#[cfg(feature = "models-dev")]
+pub mod traits;
+
+#[cfg(feature = "models-dev")]
 pub use client::ModelsDevClient;
 
 #[cfg(feature = "models-dev")]
 pub use error::ModelsDevError;
+
+#[cfg(feature = "models-dev")]
+pub use types::{
+    ApiInfo, DocInfo, EnvVar, Modalities, Model, ModelCost, ModelLimit, ModelsDevResponse, NpmInfo,
+    Provider,
+};
+
+#[cfg(feature = "models-dev")]
+pub use traits::{ModelsDevAware, ProviderConnectionInfo};

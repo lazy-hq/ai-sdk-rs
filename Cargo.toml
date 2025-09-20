@@ -19,6 +19,10 @@ models-dev = ["reqwest", "dirs", "tokio"]
 name = "openai_provider_integration_tests"
 required-features = ["openai"]
 
+[[test]]
+name = "models_dev_data_structures_tests"
+required-features = ["models-dev"]
+
 [dependencies]
 tera = "1"
 once_cell = "1.19.0"
