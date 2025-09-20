@@ -14,7 +14,7 @@ pub mod utils;
 
 // Re-export key components to provide a clean public API.
 pub use language_model::{
-    GenerateText, GenerateTextResponse, LanguageModel, StreamText, StreamTextResponse,
+    GenerateTextResponse, LanguageModel, LanguageModelRequest, StreamTextResponse,
 };
 pub use messages::{AssistantMessage, Message, Role, SystemMessage, UserMessage};
 pub use provider::Provider;

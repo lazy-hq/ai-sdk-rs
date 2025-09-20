@@ -157,9 +157,8 @@ pub struct StreamChunkData {
 }
 
 /// Options for text generation requests such as `generate_text` and `stream_text`.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GenerateOptions<M: LanguageModel> {
+pub struct LanguageModelRequest<M: LanguageModel> {
     /// The Language Model to use.
     pub model: M,
 
@@ -171,14 +170,13 @@ pub struct GenerateOptions<M: LanguageModel> {
     options: LanguageModelOptions,
 }
 
-#[allow(dead_code)]
-impl<M: LanguageModel> GenerateOptions<M> {
-    fn builder() -> GenerateOptionsBuilder<M> {
-        GenerateOptionsBuilder::default()
+impl<M: LanguageModel> LanguageModelRequest<M> {
+    pub fn builder() -> LanguageModelRequestBuilder<M> {
+        LanguageModelRequestBuilder::default()
     }
 }
 
-impl<M: LanguageModel> Deref for GenerateOptions<M> {
+impl<M: LanguageModel> Deref for LanguageModelRequest<M> {
     type Target = LanguageModelOptions;
 
     fn deref(&self) -> &Self::Target {
@@ -186,7 +184,7 @@ impl<M: LanguageModel> Deref for GenerateOptions<M> {
     }
 }
 
-impl<M: LanguageModel> DerefMut for GenerateOptions<M> {
+impl<M: LanguageModel> DerefMut for LanguageModelRequest<M> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.options
     }
@@ -211,15 +209,14 @@ pub struct ConversationStage {}
 /// returns builder.build
 pub struct OptionsStage {}
 
-#[allow(dead_code)]
-pub struct GenerateOptionsBuilder<M: LanguageModel, State = ModelStage> {
+pub struct LanguageModelRequestBuilder<M: LanguageModel, State = ModelStage> {
     model: Option<M>,
     prompt: Option<String>,
     options: LanguageModelOptions,
     state: std::marker::PhantomData<State>,
 }
 
-impl<M: LanguageModel, State> Deref for GenerateOptionsBuilder<M, State> {
+impl<M: LanguageModel, State> Deref for LanguageModelRequestBuilder<M, State> {
     type Target = LanguageModelOptions;
 
     fn deref(&self) -> &Self::Target {
@@ -227,16 +224,15 @@ impl<M: LanguageModel, State> Deref for GenerateOptionsBuilder<M, State> {
     }
 }
 
-impl<M: LanguageModel, State> DerefMut for GenerateOptionsBuilder<M, State> {
+impl<M: LanguageModel, State> DerefMut for LanguageModelRequestBuilder<M, State> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.options
     }
 }
 
-#[allow(dead_code)]
-impl<M: LanguageModel> GenerateOptionsBuilder<M> {
+impl<M: LanguageModel> LanguageModelRequestBuilder<M> {
     fn default() -> Self {
-        GenerateOptionsBuilder {
+        LanguageModelRequestBuilder {
             model: None,
             prompt: None,
             options: LanguageModelOptions::default(),
@@ -246,10 +242,9 @@ impl<M: LanguageModel> GenerateOptionsBuilder<M> {
 }
 
 /// ModelStage Builder
-#[allow(dead_code)]
-impl<M: LanguageModel> GenerateOptionsBuilder<M, ModelStage> {
-    pub fn model(self, model: M) -> GenerateOptionsBuilder<M, ConversationStage> {
-        GenerateOptionsBuilder {
+impl<M: LanguageModel> LanguageModelRequestBuilder<M, ModelStage> {
+    pub fn model(self, model: M) -> LanguageModelRequestBuilder<M, ConversationStage> {
+        LanguageModelRequestBuilder {
             model: Some(model),
             prompt: self.prompt,
             options: self.options,
@@ -259,10 +254,12 @@ impl<M: LanguageModel> GenerateOptionsBuilder<M, ModelStage> {
 }
 
 /// SystemStage Builder
-#[allow(dead_code)]
-impl<M: LanguageModel> GenerateOptionsBuilder<M, SystemStage> {
-    fn system(self, system: impl Into<String>) -> GenerateOptionsBuilder<M, ConversationStage> {
-        GenerateOptionsBuilder {
+impl<M: LanguageModel> LanguageModelRequestBuilder<M, SystemStage> {
+    pub fn system(
+        self,
+        system: impl Into<String>,
+    ) -> LanguageModelRequestBuilder<M, ConversationStage> {
+        LanguageModelRequestBuilder {
             model: self.model,
             prompt: self.prompt,
             options: LanguageModelOptions {
@@ -275,10 +272,9 @@ impl<M: LanguageModel> GenerateOptionsBuilder<M, SystemStage> {
 }
 
 /// ConversationStage Builder
-#[allow(dead_code)]
-impl<M: LanguageModel> GenerateOptionsBuilder<M, ConversationStage> {
-    fn prompt(self, prompt: impl Into<String>) -> GenerateOptionsBuilder<M, OptionsStage> {
-        GenerateOptionsBuilder {
+impl<M: LanguageModel> LanguageModelRequestBuilder<M, ConversationStage> {
+    pub fn prompt(self, prompt: impl Into<String>) -> LanguageModelRequestBuilder<M, OptionsStage> {
+        LanguageModelRequestBuilder {
             model: self.model,
             prompt: Some(prompt.into()),
             options: self.options,
@@ -286,8 +282,8 @@ impl<M: LanguageModel> GenerateOptionsBuilder<M, ConversationStage> {
         }
     }
 
-    fn messages(self, messages: Vec<Message>) -> GenerateOptionsBuilder<M, OptionsStage> {
-        GenerateOptionsBuilder {
+    pub fn messages(self, messages: Vec<Message>) -> LanguageModelRequestBuilder<M, OptionsStage> {
+        LanguageModelRequestBuilder {
             model: self.model,
             prompt: self.prompt,
             options: LanguageModelOptions {
@@ -300,49 +296,48 @@ impl<M: LanguageModel> GenerateOptionsBuilder<M, ConversationStage> {
 }
 
 /// OptionsStage Builder
-#[allow(dead_code)]
-impl<M: LanguageModel> GenerateOptionsBuilder<M, OptionsStage> {
-    fn seed(mut self, seed: impl Into<u32>) -> Self {
+impl<M: LanguageModel> LanguageModelRequestBuilder<M, OptionsStage> {
+    pub fn seed(mut self, seed: impl Into<u32>) -> Self {
         self.seed = Some(seed.into());
         self
     }
 
-    fn temperature(mut self, temperature: impl Into<u32>) -> Self {
+    pub fn temperature(mut self, temperature: impl Into<u32>) -> Self {
         self.temperature = Some(temperature.into());
         self
     }
 
-    fn top_p(mut self, top_p: impl Into<u32>) -> Self {
+    pub fn top_p(mut self, top_p: impl Into<u32>) -> Self {
         self.top_p = Some(top_p.into());
         self
     }
 
-    fn top_k(mut self, top_k: impl Into<u32>) -> Self {
+    pub fn top_k(mut self, top_k: impl Into<u32>) -> Self {
         self.top_k = Some(top_k.into());
         self
     }
 
-    fn stop_sequences(mut self, stop_sequences: impl Into<Vec<String>>) -> Self {
+    pub fn stop_sequences(mut self, stop_sequences: impl Into<Vec<String>>) -> Self {
         self.stop_sequences = Some(stop_sequences.into());
         self
     }
 
-    fn max_retries(mut self, max_retries: impl Into<u32>) -> Self {
+    pub fn max_retries(mut self, max_retries: impl Into<u32>) -> Self {
         self.max_retries = Some(max_retries.into());
         self
     }
 
-    fn frequency_penalty(mut self, frequency_penalty: impl Into<f32>) -> Self {
+    pub fn frequency_penalty(mut self, frequency_penalty: impl Into<f32>) -> Self {
         self.frequency_penalty = Some(frequency_penalty.into());
         self
     }
 
-    fn build(self) -> GenerateOptions<M> {
+    pub fn build(self) -> LanguageModelRequest<M> {
         let model = self
             .model
             .unwrap_or_else(|| unreachable!("Model must be set"));
 
-        GenerateOptions {
+        LanguageModelRequest {
             model,
             prompt: self.prompt,
             options: self.options,
@@ -350,17 +345,9 @@ impl<M: LanguageModel> GenerateOptionsBuilder<M, OptionsStage> {
     }
 }
 
-/// Core struct for generating text using a language model.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GenerateText<M: LanguageModel> {
-    pub options: GenerateOptions<M>,
-}
-
-impl<M: LanguageModel> GenerateText<M> {
-    pub fn builder() -> GenerateOptionsBuilder<M> {
-        GenerateOptionsBuilder::default()
-    }
-}
+// ============================================================================
+// Section: core function reponse types
+// ============================================================================
 
 //TODO: add standard response fields
 /// Response from a generate call on `GenerateText`.
@@ -368,18 +355,6 @@ impl<M: LanguageModel> GenerateText<M> {
 pub struct GenerateTextResponse {
     /// The generated text.
     pub text: String,
-}
-
-/// Core struct for streaming text generation using a language model.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StreamText<M: LanguageModel> {
-    pub options: GenerateOptions<M>,
-}
-
-impl<M: LanguageModel> StreamText<M> {
-    pub fn builder() -> GenerateOptionsBuilder<M> {
-        GenerateOptionsBuilder::default()
-    }
 }
 
 //TODO: add standard response fields
@@ -393,25 +368,21 @@ pub struct StreamTextResponse {
 }
 
 // ============================================================================
-// Section: implementations
+// Section: implementations, Core functions such as generate_text and stream_text
 // ============================================================================
 
-impl<M: LanguageModel> GenerateText<M> {
+impl<M: LanguageModel> LanguageModelRequest<M> {
     /// Generates text using a specified language model.
     ///
     /// Generate a text and call tools for a given prompt using a language model.
     /// This function does not stream the output. If you want to stream the output, use `StreamText` instead.
     ///
     /// Returns an `Error` if the underlying model fails to generate a response.
-    pub async fn generate(&mut self) -> Result<GenerateTextResponse> {
-        let (system_prompt, messages) = resolve_message(
-            &self.options.system,
-            &self.options.prompt,
-            &self.options.messages,
-        );
+    pub async fn generate_text(&mut self) -> Result<GenerateTextResponse> {
+        let (system_prompt, messages) =
+            resolve_message(&self.options.system, &self.prompt, &self.options.messages);
 
         let response = self
-            .options
             .model
             .generate(
                 LanguageModelOptions::builder()
@@ -432,24 +403,18 @@ impl<M: LanguageModel> GenerateText<M> {
 
         Ok(result)
     }
-}
 
-impl<M: LanguageModel> StreamText<M> {
     /// Generates Streaming text using a specified language model.
     ///
     /// Generate a text and call tools for a given prompt using a language model.
     /// This function streams the output. If you do not want to stream the output, use `GenerateText` instead.
     ///
     /// Returns an `Error` if the underlying model fails to generate a response.
-    pub async fn stream(&mut self) -> Result<StreamTextResponse> {
-        let (system_prompt, messages) = resolve_message(
-            &self.options.system,
-            &self.options.prompt,
-            &self.options.messages,
-        );
+    pub async fn stream_text(&mut self) -> Result<StreamTextResponse> {
+        let (system_prompt, messages) =
+            resolve_message(&self.options.system, &self.prompt, &self.options.messages);
 
         let response = self
-            .options
             .model
             .generate_stream(
                 LanguageModelOptions::builder()
