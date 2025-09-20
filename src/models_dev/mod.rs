@@ -19,6 +19,9 @@ pub mod traits;
 pub mod registry;
 
 #[cfg(feature = "models-dev")]
+pub mod convenience;
+
+#[cfg(feature = "models-dev")]
 pub use client::ModelsDevClient;
 
 #[cfg(feature = "models-dev")]
@@ -37,3 +40,10 @@ pub use types::{
 
 #[cfg(feature = "models-dev")]
 pub use traits::{ModelsDevAware, ProviderConnectionInfo};
+
+#[cfg(feature = "models-dev")]
+pub use convenience::{
+    check_provider_configuration, find_best_model_for_use_case, find_models_with_capability,
+    find_provider_for_cloud_service, get_capability_summary, get_providers_summary,
+    list_providers_for_npm_package,
+};

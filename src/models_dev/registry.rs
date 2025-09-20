@@ -12,6 +12,7 @@ use tokio::sync::RwLock;
 use crate::models_dev::{
     client::ModelsDevClient,
     error::ModelsDevError,
+    traits::{ModelsDevAware, ProviderConnectionInfo},
     types::{Model, ModelsDevResponse, Provider as ApiProvider},
 };
 
@@ -476,6 +477,228 @@ impl ProviderRegistry {
             mapping.clear();
         }
     }
+
+    /// Find providers that support a specific npm package.
+    ///
+    /// This method searches for providers that have the given npm package name
+    /// in their npm information.
+    ///
+    /// # Arguments
+    /// * `npm_package` - The npm package name to search for (e.g., "@ai-sdk/openai")
+    ///
+    /// # Returns
+    /// * A vector of provider IDs (String) for providers that support the npm package
+    pub async fn find_providers_by_npm(&self, npm_package: &str) -> Vec<String> {
+        let providers = self.providers.read().await;
+        providers
+            .values()
+            .filter(|provider| provider.npm_name == npm_package)
+            .map(|provider| provider.id.clone())
+            .collect()
+    }
+
+    /// Get models with specific capabilities.
+    ///
+    /// This method filters models based on their capabilities such as reasoning,
+    /// tool calling, attachment support, or vision capabilities.
+    ///
+    /// # Arguments
+    /// * `capability` - The capability to filter by ("reasoning", "tool_call", "attachment", "vision")
+    ///
+    /// # Returns
+    /// * A vector of ModelInfo that have the specified capability
+    pub async fn get_models_with_capability(&self, capability: &str) -> Vec<ModelInfo> {
+        let models = self.models.read().await;
+        models
+            .values()
+            .filter(|model| {
+                match capability {
+                    // Check for reasoning capability (cost has reasoning field)
+                    "reasoning" => model.cost.reasoning.is_some(),
+                    // Check for tool calling capability (metadata indicates tool support)
+                    "tool_call" => model
+                        .metadata
+                        .get("supports_tools")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false),
+                    // Check for attachment support (input modalities include file/document types)
+                    "attachment" => model.input_modalities.iter().any(|modality| {
+                        modality.contains("file")
+                            || modality.contains("document")
+                            || modality.contains("attachment")
+                    }),
+                    // Check for vision capability (input modalities include image)
+                    "vision" => model.input_modalities.contains(&"image".to_string()),
+                    // Unknown capability
+                    _ => false,
+                }
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Get providers grouped with their models.
+    ///
+    /// This method returns a vector of tuples where each tuple contains
+    /// a provider ID, a ProviderInfo, and a vector of ModelInfo for that provider.
+    ///
+    /// # Returns
+    /// * A vector of (String, ProviderInfo, Vec<ModelInfo>) tuples
+    pub async fn get_providers_with_models(&self) -> Vec<(String, ProviderInfo, Vec<ModelInfo>)> {
+        let providers = self.providers.read().await;
+        let models = self.models.read().await;
+
+        providers
+            .values()
+            .map(|provider| {
+                let provider_models: Vec<ModelInfo> = models
+                    .values()
+                    .filter(|model| model.provider_id == provider.id)
+                    .cloned()
+                    .collect();
+                (provider.id.clone(), provider.clone(), provider_models)
+            })
+            .collect()
+    }
+
+    /// Get ProviderConnectionInfo for a provider.
+    ///
+    /// This method creates a ProviderConnectionInfo struct from the provider's
+    /// configuration, which can be used to create provider instances.
+    ///
+    /// # Arguments
+    /// * `provider_id` - The ID of the provider to get connection info for
+    ///
+    /// # Returns
+    /// * Some(ProviderConnectionInfo) if the provider exists
+    /// * None if the provider doesn't exist
+    pub async fn get_connection_info(&self, provider_id: &str) -> Option<ProviderConnectionInfo> {
+        let providers = self.providers.read().await;
+        let provider = providers.get(provider_id)?;
+
+        let mut connection_info = ProviderConnectionInfo::new(&provider.base_url);
+
+        // Add required environment variables
+        for env_var in &provider.env_vars {
+            if env_var.required {
+                connection_info = connection_info.with_required_env(&env_var.name);
+            } else {
+                connection_info = connection_info.with_optional_env(&env_var.name);
+            }
+        }
+
+        // Add API version if available
+        if let Some(version) = &provider.api_version {
+            connection_info = connection_info.with_config("api_version", version);
+        }
+
+        Some(connection_info)
+    }
+
+    /// Create a provider instance using the ModelsDevAware trait.
+    ///
+    /// This method attempts to create a provider instance of type T that implements
+    /// the ModelsDevAware trait. It uses the provider information from the registry
+    /// to create the instance.
+    ///
+    /// # Type Parameters
+    /// * `T` - A type that implements ModelsDevAware
+    ///
+    /// # Arguments
+    /// * `provider_id` - The ID of the provider to create
+    ///
+    /// # Returns
+    /// * Ok(T) if the provider was successfully created
+    /// * Err(ModelsDevError) if the provider couldn't be created
+    pub async fn create_provider<T: ModelsDevAware>(
+        &self,
+        provider_id: &str,
+    ) -> Result<T, ModelsDevError> {
+        let providers = self.providers.read().await;
+        let models = self.models.read().await;
+
+        // Get the provider info
+        let provider_info = providers.get(provider_id).ok_or_else(|| {
+            ModelsDevError::ProviderNotFound(format!("Provider '{}' not found", provider_id))
+        })?;
+
+        // Use the first available model for the provider
+        let model_info = models
+            .values()
+            .find(|model| model.provider_id == provider_id)
+            .ok_or_else(|| {
+                ModelsDevError::NoModelsAvailable(format!(
+                    "No models available for provider '{}'",
+                    provider_id
+                ))
+            })?;
+
+        // Convert the internal model info to API model format
+        let api_model = Model {
+            id: model_info.id.clone(),
+            name: model_info.name.clone(),
+            description: model_info.description.clone(),
+            cost: crate::models_dev::types::ModelCost {
+                input: model_info.cost.input,
+                output: model_info.cost.output,
+                cache_read: model_info.cost.cache_read,
+                cache_write: model_info.cost.cache_write,
+                reasoning: model_info.cost.reasoning,
+                currency: model_info.cost.currency.clone(),
+            },
+            limits: crate::models_dev::types::ModelLimit {
+                context: model_info.limits.context,
+                output: model_info.limits.output,
+                metadata: model_info.limits.metadata.clone(),
+            },
+            modalities: crate::models_dev::types::Modalities {
+                input: model_info.input_modalities.clone(),
+                output: model_info.output_modalities.clone(),
+            },
+            metadata: model_info.metadata.clone(),
+        };
+
+        // Clone the model for the provider models vector
+        let api_model_clone = api_model.clone();
+
+        // Convert the internal provider info to API provider format
+        let api_provider = ApiProvider {
+            id: provider_info.id.clone(),
+            name: provider_info.name.clone(),
+            npm: crate::models_dev::types::NpmInfo {
+                name: provider_info.npm_name.clone(),
+                version: provider_info.npm_version.clone(),
+            },
+            env: provider_info
+                .env_vars
+                .iter()
+                .map(|env_var| crate::models_dev::types::EnvVar {
+                    name: env_var.name.clone(),
+                    description: env_var.description.clone(),
+                    required: env_var.required,
+                })
+                .collect(),
+            doc: crate::models_dev::types::DocInfo {
+                url: provider_info.doc_url.clone(),
+                metadata: std::collections::HashMap::new(),
+            },
+            api: crate::models_dev::types::ApiInfo {
+                base_url: provider_info.base_url.clone(),
+                version: provider_info.api_version.clone(),
+                config: std::collections::HashMap::new(),
+            },
+            models: vec![api_model_clone], // Include the selected model
+        };
+
+        // Try to create the provider using the ModelsDevAware trait
+        T::from_models_dev_info(&api_provider, Some(&api_model)).ok_or_else(|| {
+            ModelsDevError::UnsupportedProvider(format!(
+                "Provider '{}' is not supported by type {}",
+                provider_id,
+                std::any::type_name::<T>()
+            ))
+        })
+    }
 }
 
 impl Default for ProviderRegistry {
@@ -600,5 +823,545 @@ mod tests {
 
         // Test unknown model
         assert_eq!(registry.apply_model_heuristics("unknown-model").await, None);
+    }
+
+    #[tokio::test]
+    async fn test_find_providers_by_npm() {
+        let registry = ProviderRegistry::default();
+
+        // Add test providers with different npm packages
+        {
+            let mut providers = registry.providers.write().await;
+            providers.insert(
+                "openai".to_string(),
+                ProviderInfo {
+                    id: "openai".to_string(),
+                    name: "OpenAI".to_string(),
+                    base_url: "https://api.openai.com".to_string(),
+                    npm_name: "@ai-sdk/openai".to_string(),
+                    npm_version: "1.0.0".to_string(),
+                    env_vars: vec![],
+                    doc_url: "https://platform.openai.com/docs".to_string(),
+                    api_version: None,
+                    available: true,
+                    model_ids: vec![],
+                },
+            );
+
+            providers.insert(
+                "anthropic".to_string(),
+                ProviderInfo {
+                    id: "anthropic".to_string(),
+                    name: "Anthropic".to_string(),
+                    base_url: "https://api.anthropic.com".to_string(),
+                    npm_name: "@ai-sdk/anthropic".to_string(),
+                    npm_version: "1.0.0".to_string(),
+                    env_vars: vec![],
+                    doc_url: "https://docs.anthropic.com".to_string(),
+                    api_version: None,
+                    available: true,
+                    model_ids: vec![],
+                },
+            );
+
+            providers.insert(
+                "another-openai".to_string(),
+                ProviderInfo {
+                    id: "another-openai".to_string(),
+                    name: "Another OpenAI".to_string(),
+                    base_url: "https://another.openai.com".to_string(),
+                    npm_name: "@ai-sdk/openai".to_string(), // Same npm package
+                    npm_version: "1.0.0".to_string(),
+                    env_vars: vec![],
+                    doc_url: "https://another.openai.com/docs".to_string(),
+                    api_version: None,
+                    available: true,
+                    model_ids: vec![],
+                },
+            );
+        }
+
+        // Test finding providers by npm package
+        let openai_providers = registry.find_providers_by_npm("@ai-sdk/openai").await;
+        assert_eq!(openai_providers.len(), 2);
+        assert!(openai_providers.contains(&"openai".to_string()));
+        assert!(openai_providers.contains(&"another-openai".to_string()));
+
+        let anthropic_providers = registry.find_providers_by_npm("@ai-sdk/anthropic").await;
+        assert_eq!(anthropic_providers.len(), 1);
+        assert!(anthropic_providers.contains(&"anthropic".to_string()));
+
+        // Test non-existent npm package
+        let non_existent = registry.find_providers_by_npm("@ai-sdk/non-existent").await;
+        assert_eq!(non_existent.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_models_with_capability() {
+        let registry = ProviderRegistry::default();
+
+        // Add test models with different capabilities
+        {
+            let mut models = registry.models.write().await;
+
+            // Model with reasoning capability
+            models.insert(
+                "reasoning-model".to_string(),
+                ModelInfo {
+                    id: "reasoning-model".to_string(),
+                    name: "Reasoning Model".to_string(),
+                    description: "A model with reasoning capability".to_string(),
+                    provider_id: "test-provider".to_string(),
+                    cost: ModelCostInfo {
+                        input: 0.01,
+                        output: 0.02,
+                        cache_read: None,
+                        cache_write: None,
+                        reasoning: Some(0.03), // Has reasoning capability
+                        currency: "USD".to_string(),
+                    },
+                    limits: ModelLimitInfo {
+                        context: 4096,
+                        output: 2048,
+                        metadata: HashMap::new(),
+                    },
+                    input_modalities: vec!["text".to_string()],
+                    output_modalities: vec!["text".to_string()],
+                    metadata: HashMap::new(),
+                },
+            );
+
+            // Model with tool calling capability
+            let mut tool_call_metadata = HashMap::new();
+            tool_call_metadata.insert("supports_tools".to_string(), serde_json::Value::Bool(true));
+            models.insert(
+                "tool-call-model".to_string(),
+                ModelInfo {
+                    id: "tool-call-model".to_string(),
+                    name: "Tool Call Model".to_string(),
+                    description: "A model with tool calling capability".to_string(),
+                    provider_id: "test-provider".to_string(),
+                    cost: ModelCostInfo {
+                        input: 0.01,
+                        output: 0.02,
+                        cache_read: None,
+                        cache_write: None,
+                        reasoning: None,
+                        currency: "USD".to_string(),
+                    },
+                    limits: ModelLimitInfo {
+                        context: 4096,
+                        output: 2048,
+                        metadata: HashMap::new(),
+                    },
+                    input_modalities: vec!["text".to_string()],
+                    output_modalities: vec!["text".to_string()],
+                    metadata: tool_call_metadata,
+                },
+            );
+
+            // Model with attachment capability
+            models.insert(
+                "attachment-model".to_string(),
+                ModelInfo {
+                    id: "attachment-model".to_string(),
+                    name: "Attachment Model".to_string(),
+                    description: "A model with attachment capability".to_string(),
+                    provider_id: "test-provider".to_string(),
+                    cost: ModelCostInfo {
+                        input: 0.01,
+                        output: 0.02,
+                        cache_read: None,
+                        cache_write: None,
+                        reasoning: None,
+                        currency: "USD".to_string(),
+                    },
+                    limits: ModelLimitInfo {
+                        context: 4096,
+                        output: 2048,
+                        metadata: HashMap::new(),
+                    },
+                    input_modalities: vec![
+                        "text".to_string(),
+                        "file".to_string(),
+                        "document".to_string(),
+                    ],
+                    output_modalities: vec!["text".to_string()],
+                    metadata: HashMap::new(),
+                },
+            );
+
+            // Model with vision capability
+            models.insert(
+                "vision-model".to_string(),
+                ModelInfo {
+                    id: "vision-model".to_string(),
+                    name: "Vision Model".to_string(),
+                    description: "A model with vision capability".to_string(),
+                    provider_id: "test-provider".to_string(),
+                    cost: ModelCostInfo {
+                        input: 0.01,
+                        output: 0.02,
+                        cache_read: None,
+                        cache_write: None,
+                        reasoning: None,
+                        currency: "USD".to_string(),
+                    },
+                    limits: ModelLimitInfo {
+                        context: 4096,
+                        output: 2048,
+                        metadata: HashMap::new(),
+                    },
+                    input_modalities: vec!["text".to_string(), "image".to_string()],
+                    output_modalities: vec!["text".to_string()],
+                    metadata: HashMap::new(),
+                },
+            );
+
+            // Model without special capabilities
+            models.insert(
+                "basic-model".to_string(),
+                ModelInfo {
+                    id: "basic-model".to_string(),
+                    name: "Basic Model".to_string(),
+                    description: "A basic model without special capabilities".to_string(),
+                    provider_id: "test-provider".to_string(),
+                    cost: ModelCostInfo {
+                        input: 0.01,
+                        output: 0.02,
+                        cache_read: None,
+                        cache_write: None,
+                        reasoning: None,
+                        currency: "USD".to_string(),
+                    },
+                    limits: ModelLimitInfo {
+                        context: 4096,
+                        output: 2048,
+                        metadata: HashMap::new(),
+                    },
+                    input_modalities: vec!["text".to_string()],
+                    output_modalities: vec!["text".to_string()],
+                    metadata: HashMap::new(),
+                },
+            );
+        }
+
+        // Test reasoning capability
+        let reasoning_models = registry.get_models_with_capability("reasoning").await;
+        assert_eq!(reasoning_models.len(), 1);
+        assert_eq!(reasoning_models[0].id, "reasoning-model");
+
+        // Test tool calling capability
+        let tool_call_models = registry.get_models_with_capability("tool_call").await;
+        assert_eq!(tool_call_models.len(), 1);
+        assert_eq!(tool_call_models[0].id, "tool-call-model");
+
+        // Test attachment capability
+        let attachment_models = registry.get_models_with_capability("attachment").await;
+        assert_eq!(attachment_models.len(), 1);
+        assert_eq!(attachment_models[0].id, "attachment-model");
+
+        // Test vision capability
+        let vision_models = registry.get_models_with_capability("vision").await;
+        assert_eq!(vision_models.len(), 1);
+        assert_eq!(vision_models[0].id, "vision-model");
+
+        // Test unknown capability
+        let unknown_models = registry.get_models_with_capability("unknown").await;
+        assert_eq!(unknown_models.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_providers_with_models() {
+        let registry = ProviderRegistry::default();
+
+        // Add test providers and models
+        {
+            let mut providers = registry.providers.write().await;
+            let mut models = registry.models.write().await;
+
+            // Add OpenAI provider
+            providers.insert(
+                "openai".to_string(),
+                ProviderInfo {
+                    id: "openai".to_string(),
+                    name: "OpenAI".to_string(),
+                    base_url: "https://api.openai.com".to_string(),
+                    npm_name: "@ai-sdk/openai".to_string(),
+                    npm_version: "1.0.0".to_string(),
+                    env_vars: vec![],
+                    doc_url: "https://platform.openai.com/docs".to_string(),
+                    api_version: None,
+                    available: true,
+                    model_ids: vec!["gpt-4".to_string(), "gpt-3.5-turbo".to_string()],
+                },
+            );
+
+            // Add Anthropic provider
+            providers.insert(
+                "anthropic".to_string(),
+                ProviderInfo {
+                    id: "anthropic".to_string(),
+                    name: "Anthropic".to_string(),
+                    base_url: "https://api.anthropic.com".to_string(),
+                    npm_name: "@ai-sdk/anthropic".to_string(),
+                    npm_version: "1.0.0".to_string(),
+                    env_vars: vec![],
+                    doc_url: "https://docs.anthropic.com".to_string(),
+                    api_version: None,
+                    available: true,
+                    model_ids: vec!["claude-3-opus".to_string()],
+                },
+            );
+
+            // Add models for OpenAI
+            models.insert(
+                "gpt-4".to_string(),
+                ModelInfo {
+                    id: "gpt-4".to_string(),
+                    name: "GPT-4".to_string(),
+                    description: "GPT-4 model".to_string(),
+                    provider_id: "openai".to_string(),
+                    cost: ModelCostInfo {
+                        input: 0.03,
+                        output: 0.06,
+                        cache_read: None,
+                        cache_write: None,
+                        reasoning: None,
+                        currency: "USD".to_string(),
+                    },
+                    limits: ModelLimitInfo {
+                        context: 8192,
+                        output: 4096,
+                        metadata: HashMap::new(),
+                    },
+                    input_modalities: vec!["text".to_string()],
+                    output_modalities: vec!["text".to_string()],
+                    metadata: HashMap::new(),
+                },
+            );
+
+            models.insert(
+                "gpt-3.5-turbo".to_string(),
+                ModelInfo {
+                    id: "gpt-3.5-turbo".to_string(),
+                    name: "GPT-3.5 Turbo".to_string(),
+                    description: "GPT-3.5 Turbo model".to_string(),
+                    provider_id: "openai".to_string(),
+                    cost: ModelCostInfo {
+                        input: 0.0015,
+                        output: 0.002,
+                        cache_read: None,
+                        cache_write: None,
+                        reasoning: None,
+                        currency: "USD".to_string(),
+                    },
+                    limits: ModelLimitInfo {
+                        context: 4096,
+                        output: 2048,
+                        metadata: HashMap::new(),
+                    },
+                    input_modalities: vec!["text".to_string()],
+                    output_modalities: vec!["text".to_string()],
+                    metadata: HashMap::new(),
+                },
+            );
+
+            // Add model for Anthropic
+            models.insert(
+                "claude-3-opus".to_string(),
+                ModelInfo {
+                    id: "claude-3-opus".to_string(),
+                    name: "Claude 3 Opus".to_string(),
+                    description: "Claude 3 Opus model".to_string(),
+                    provider_id: "anthropic".to_string(),
+                    cost: ModelCostInfo {
+                        input: 0.015,
+                        output: 0.075,
+                        cache_read: None,
+                        cache_write: None,
+                        reasoning: None,
+                        currency: "USD".to_string(),
+                    },
+                    limits: ModelLimitInfo {
+                        context: 200000,
+                        output: 4096,
+                        metadata: HashMap::new(),
+                    },
+                    input_modalities: vec!["text".to_string()],
+                    output_modalities: vec!["text".to_string()],
+                    metadata: HashMap::new(),
+                },
+            );
+        }
+
+        // Test getting providers with models
+        let providers_with_models = registry.get_providers_with_models().await;
+        assert_eq!(providers_with_models.len(), 2);
+
+        // Find OpenAI provider
+        let openai_data = providers_with_models
+            .iter()
+            .find(|(id, _, _)| id == "openai")
+            .unwrap();
+        assert_eq!(openai_data.0, "openai");
+        assert_eq!(openai_data.1.id, "openai");
+        assert_eq!(openai_data.1.name, "OpenAI");
+        assert_eq!(openai_data.2.len(), 2);
+        assert!(openai_data.2.iter().any(|m| m.id == "gpt-4"));
+        assert!(openai_data.2.iter().any(|m| m.id == "gpt-3.5-turbo"));
+
+        // Find Anthropic provider
+        let anthropic_data = providers_with_models
+            .iter()
+            .find(|(id, _, _)| id == "anthropic")
+            .unwrap();
+        assert_eq!(anthropic_data.0, "anthropic");
+        assert_eq!(anthropic_data.1.id, "anthropic");
+        assert_eq!(anthropic_data.1.name, "Anthropic");
+        assert_eq!(anthropic_data.2.len(), 1);
+        assert_eq!(anthropic_data.2[0].id, "claude-3-opus");
+    }
+
+    #[tokio::test]
+    async fn test_get_connection_info() {
+        let registry = ProviderRegistry::default();
+
+        // Add test provider
+        {
+            let mut providers = registry.providers.write().await;
+            providers.insert(
+                "test-provider".to_string(),
+                ProviderInfo {
+                    id: "test-provider".to_string(),
+                    name: "Test Provider".to_string(),
+                    base_url: "https://api.test.com".to_string(),
+                    npm_name: "@ai-sdk/test".to_string(),
+                    npm_version: "1.0.0".to_string(),
+                    env_vars: vec![
+                        EnvVarInfo {
+                            name: "TEST_API_KEY".to_string(),
+                            description: "Test API key".to_string(),
+                            required: true,
+                        },
+                        EnvVarInfo {
+                            name: "TEST_OPTIONAL".to_string(),
+                            description: "Optional setting".to_string(),
+                            required: false,
+                        },
+                    ],
+                    doc_url: "https://test.com/docs".to_string(),
+                    api_version: Some("v1".to_string()),
+                    available: true,
+                    model_ids: vec![],
+                },
+            );
+        }
+
+        // Test getting connection info
+        let connection_info = registry.get_connection_info("test-provider").await;
+        assert!(connection_info.is_some());
+
+        let info = connection_info.unwrap();
+        assert_eq!(info.base_url, "https://api.test.com");
+        assert_eq!(info.required_env_vars, vec!["TEST_API_KEY"]);
+        assert_eq!(info.optional_env_vars, vec!["TEST_OPTIONAL"]);
+        assert_eq!(info.config.get("api_version"), Some(&"v1".to_string()));
+
+        // Test getting connection info for non-existent provider
+        let non_existent = registry.get_connection_info("non-existent").await;
+        assert!(non_existent.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_create_provider() {
+        let registry = ProviderRegistry::default();
+
+        // Add test provider and model
+        {
+            let mut providers = registry.providers.write().await;
+            let mut models = registry.models.write().await;
+
+            providers.insert(
+                "openai".to_string(),
+                ProviderInfo {
+                    id: "openai".to_string(),
+                    name: "OpenAI".to_string(),
+                    base_url: "https://api.openai.com".to_string(),
+                    npm_name: "@ai-sdk/openai".to_string(),
+                    npm_version: "1.0.0".to_string(),
+                    env_vars: vec![],
+                    doc_url: "https://platform.openai.com/docs".to_string(),
+                    api_version: None,
+                    available: true,
+                    model_ids: vec!["gpt-4".to_string()],
+                },
+            );
+
+            models.insert(
+                "gpt-4".to_string(),
+                ModelInfo {
+                    id: "gpt-4".to_string(),
+                    name: "GPT-4".to_string(),
+                    description: "GPT-4 model".to_string(),
+                    provider_id: "openai".to_string(),
+                    cost: ModelCostInfo {
+                        input: 0.03,
+                        output: 0.06,
+                        cache_read: None,
+                        cache_write: None,
+                        reasoning: None,
+                        currency: "USD".to_string(),
+                    },
+                    limits: ModelLimitInfo {
+                        context: 8192,
+                        output: 4096,
+                        metadata: HashMap::new(),
+                    },
+                    input_modalities: vec!["text".to_string()],
+                    output_modalities: vec!["text".to_string()],
+                    metadata: HashMap::new(),
+                },
+            );
+        }
+
+        // Test creating provider (this will fail without proper environment setup, but we can test the error path)
+        let result = registry
+            .create_provider::<crate::models_dev::traits::OpenAIProvider>("openai")
+            .await;
+
+        // This should fail because OPENAI_API_KEY environment variable is not set
+        assert!(result.is_err());
+
+        // Test creating non-existent provider
+        let non_existent_result = registry
+            .create_provider::<crate::models_dev::traits::OpenAIProvider>("non-existent")
+            .await;
+        assert!(non_existent_result.is_err());
+
+        // Test creating provider with no models
+        {
+            let mut providers = registry.providers.write().await;
+            providers.insert(
+                "empty-provider".to_string(),
+                ProviderInfo {
+                    id: "empty-provider".to_string(),
+                    name: "Empty Provider".to_string(),
+                    base_url: "https://api.empty.com".to_string(),
+                    npm_name: "@ai-sdk/empty".to_string(),
+                    npm_version: "1.0.0".to_string(),
+                    env_vars: vec![],
+                    doc_url: "https://empty.com/docs".to_string(),
+                    api_version: None,
+                    available: true,
+                    model_ids: vec![],
+                },
+            );
+        }
+
+        let empty_result = registry
+            .create_provider::<crate::models_dev::traits::OpenAIProvider>("empty-provider")
+            .await;
+        assert!(empty_result.is_err());
     }
 }

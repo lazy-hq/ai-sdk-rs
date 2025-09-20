@@ -36,4 +36,20 @@ pub enum ModelsDevError {
     /// Invalid URL.
     #[error("Invalid URL: {0}")]
     InvalidUrl(String),
+
+    /// Provider not found in registry.
+    #[error("Provider not found: {0}")]
+    ProviderNotFound(String),
+
+    /// Model not found in registry.
+    #[error("Model not found: {0}")]
+    ModelNotFound(String),
+
+    /// No models available for provider.
+    #[error("No models available: {0}")]
+    NoModelsAvailable(String),
+
+    /// Provider is not supported by the requested type.
+    #[error("Unsupported provider: {0}")]
+    UnsupportedProvider(String),
 }

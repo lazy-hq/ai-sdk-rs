@@ -7,7 +7,7 @@ use crate::models_dev::types::{Model, Provider};
 use std::collections::HashMap;
 
 /// Connection information for a provider that implements ModelsDevAware.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderConnectionInfo {
     /// The base URL for the provider's API.
     pub base_url: String,
@@ -194,6 +194,7 @@ pub trait ModelsDevAware {
 
 /// Example implementation for demonstration purposes.
 #[cfg(feature = "models-dev")]
+#[derive(Debug, Clone)]
 pub struct ExampleProvider {
     /// The base URL for the provider's API.
     pub base_url: String,
@@ -228,6 +229,151 @@ impl ModelsDevAware for ExampleProvider {
             base_url: provider.api.base_url.clone(),
             api_key,
             model: model_id,
+        })
+    }
+}
+
+/// Example OpenAI provider implementation.
+#[cfg(feature = "models-dev")]
+#[derive(Debug, Clone)]
+pub struct OpenAIProvider {
+    /// The base URL for the OpenAI API.
+    pub base_url: String,
+    /// The OpenAI API key.
+    pub api_key: String,
+    /// The model to use.
+    pub model: String,
+    /// Optional organization ID.
+    pub organization: Option<String>,
+}
+
+#[cfg(feature = "models-dev")]
+impl ModelsDevAware for OpenAIProvider {
+    fn supported_npm_packages() -> Vec<String> {
+        vec!["@ai-sdk/openai".to_string()]
+    }
+
+    fn from_models_dev_info(provider: &Provider, model: Option<&Model>) -> Option<Self> {
+        // Check if this provider supports the NPM package
+        if !Self::supported_npm_packages().contains(&provider.npm.name) {
+            return None;
+        }
+
+        // Get the API key from environment
+        let api_key = std::env::var("OPENAI_API_KEY").ok()?;
+
+        // Use the provided model or the first available model
+        let model_id = model.map_or_else(
+            || provider.models.first().map(|m| m.id.clone()),
+            |m| Some(m.id.clone()),
+        )?;
+
+        // Get optional organization ID
+        let organization = std::env::var("OPENAI_ORGANIZATION").ok();
+
+        Some(Self {
+            base_url: provider.api.base_url.clone(),
+            api_key,
+            model: model_id,
+            organization,
+        })
+    }
+}
+
+/// Example Anthropic provider implementation.
+#[cfg(feature = "models-dev")]
+#[derive(Debug, Clone)]
+pub struct AnthropicProvider {
+    /// The base URL for the Anthropic API.
+    pub base_url: String,
+    /// The Anthropic API key.
+    pub api_key: String,
+    /// The model to use.
+    pub model: String,
+    /// Optional API version.
+    pub api_version: Option<String>,
+}
+
+#[cfg(feature = "models-dev")]
+impl ModelsDevAware for AnthropicProvider {
+    fn supported_npm_packages() -> Vec<String> {
+        vec!["@ai-sdk/anthropic".to_string()]
+    }
+
+    fn from_models_dev_info(provider: &Provider, model: Option<&Model>) -> Option<Self> {
+        // Check if this provider supports the NPM package
+        if !Self::supported_npm_packages().contains(&provider.npm.name) {
+            return None;
+        }
+
+        // Get the API key from environment
+        let api_key = std::env::var("ANTHROPIC_API_KEY").ok()?;
+
+        // Use the provided model or the first available model
+        let model_id = model.map_or_else(
+            || provider.models.first().map(|m| m.id.clone()),
+            |m| Some(m.id.clone()),
+        )?;
+
+        // Get API version from provider config or environment
+        let api_version = provider
+            .api
+            .version
+            .clone()
+            .or_else(|| std::env::var("ANTHROPIC_API_VERSION").ok());
+
+        Some(Self {
+            base_url: provider.api.base_url.clone(),
+            api_key,
+            model: model_id,
+            api_version,
+        })
+    }
+}
+
+/// Example Google provider implementation.
+#[cfg(feature = "models-dev")]
+#[derive(Debug, Clone)]
+pub struct GoogleProvider {
+    /// The base URL for the Google AI API.
+    pub base_url: String,
+    /// The Google API key.
+    pub api_key: String,
+    /// The model to use.
+    pub model: String,
+    /// Optional project ID.
+    pub project_id: Option<String>,
+}
+
+#[cfg(feature = "models-dev")]
+impl ModelsDevAware for GoogleProvider {
+    fn supported_npm_packages() -> Vec<String> {
+        vec!["@ai-sdk/google".to_string()]
+    }
+
+    fn from_models_dev_info(provider: &Provider, model: Option<&Model>) -> Option<Self> {
+        // Check if this provider supports the NPM package
+        if !Self::supported_npm_packages().contains(&provider.npm.name) {
+            return None;
+        }
+
+        // Get the API key from environment
+        let api_key = std::env::var("GOOGLE_API_KEY").ok()?;
+
+        // Use the provided model or the first available model
+        let model_id = model.map_or_else(
+            || provider.models.first().map(|m| m.id.clone()),
+            |m| Some(m.id.clone()),
+        )?;
+
+        // Get optional project ID
+        let project_id = std::env::var("GOOGLE_PROJECT_ID").ok();
+
+        Some(Self {
+            base_url: provider.api.base_url.clone(),
+            api_key,
+            model: model_id,
+            project_id,
         })
     }
 }
