@@ -403,20 +403,14 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
         let (system_prompt, messages) =
             resolve_message(&self.options.system, &self.prompt, &self.options.messages);
 
-        let response = self
-            .model
-            .generate(
-                LanguageModelOptions::builder()
-                    .system(system_prompt)
-                    .messages(messages)
-                    .max_output_tokens(self.options.max_output_tokens)
-                    .temperature(self.options.temperature)
-                    .top_p(self.options.top_p)
-                    .top_k(self.options.top_k)
-                    .stop_sequences(self.options.stop_sequences.clone())
-                    .build()?,
-            )
-            .await?;
+        let options = LanguageModelOptions {
+            system: Some(system_prompt),
+            messages,
+            stop_sequences: self.options.stop_sequences.to_owned(),
+            ..self.options
+        };
+
+        let response = self.model.generate(options).await?;
 
         let result = GenerateTextResponse {
             text: response.text,
@@ -435,20 +429,14 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
         let (system_prompt, messages) =
             resolve_message(&self.options.system, &self.prompt, &self.options.messages);
 
-        let response = self
-            .model
-            .generate_stream(
-                LanguageModelOptions::builder()
-                    .system(system_prompt)
-                    .messages(messages)
-                    .max_output_tokens(self.options.max_output_tokens)
-                    .temperature(self.options.temperature)
-                    .top_p(self.options.top_p)
-                    .top_k(self.options.top_k)
-                    .stop_sequences(self.options.stop_sequences.clone())
-                    .build()?,
-            )
-            .await?;
+        let options = LanguageModelOptions {
+            system: Some(system_prompt),
+            messages,
+            stop_sequences: self.options.stop_sequences.to_owned(),
+            ..self.options
+        };
+
+        let response = self.model.generate_stream(options).await?;
 
         let result = StreamTextResponse {
             stream: Box::pin(response.stream),
