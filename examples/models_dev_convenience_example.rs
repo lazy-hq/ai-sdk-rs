@@ -13,7 +13,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ProviderRegistry, check_provider_configuration, find_best_model_for_use_case,
         find_models_with_capability, find_provider_for_cloud_service, get_capability_summary,
         get_providers_summary, list_providers_for_npm_package,
-        traits::{AnthropicProvider, GoogleProvider, ModelsDevAware, OpenAIProvider},
+        traits::{AnthropicProvider, GoogleProvider, OpenAIProvider},
     };
 
     println!("Models.dev Convenience Functions Example");

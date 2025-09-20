@@ -98,8 +98,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for capability in capabilities {
         let models = find_models_with_capability(&registry, capability).await;
         println!("  {} -> {} models", capability, models.len());
-        for model_id in models {
-            println!("    - {}", model_id);
+        for model in models {
+            println!("    - {}", model.id);
         }
     }
 

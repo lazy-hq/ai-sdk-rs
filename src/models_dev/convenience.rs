@@ -115,8 +115,7 @@ pub async fn list_providers_for_npm_package(
     registry: &ProviderRegistry,
     npm_package: &str,
 ) -> Vec<String> {
-    let providers = registry.find_providers_by_npm(npm_package).await;
-    providers
+    registry.find_providers_by_npm(npm_package).await
 }
 
 /// Find models with a specific capability.

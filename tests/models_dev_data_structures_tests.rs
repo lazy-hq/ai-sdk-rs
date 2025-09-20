@@ -3,7 +3,7 @@
 #[cfg(feature = "models-dev")]
 mod tests {
     use aisdk::models_dev::{
-        traits::{ModelsDevAware, ProviderConnectionInfo},
+        traits::ProviderConnectionInfo,
         types::{
             ApiInfo, DocInfo, EnvVar, Modalities, Model, ModelCost, ModelLimit, ModelsDevResponse,
             NpmInfo, Provider,

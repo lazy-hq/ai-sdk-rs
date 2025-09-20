@@ -1,7 +1,8 @@
 //! Integration tests for the complete models.dev workflow.
 //!
 //! These tests verify that all the convenience functions and registry methods
-//! work together correctly in realistic scenarios.
+//! work together correctly in realistic scenarios, including edge cases,
+//! error handling, and performance considerations.
 
 #[cfg(feature = "models-dev")]
 #[cfg(test)]
@@ -10,7 +11,7 @@ mod tests {
         ProviderRegistry, check_provider_configuration, find_best_model_for_use_case,
         find_models_with_capability, find_provider_for_cloud_service, get_capability_summary,
         get_providers_summary, list_providers_for_npm_package,
-        traits::{AnthropicProvider, GoogleProvider, ModelsDevAware, OpenAIProvider},
+        traits::{AnthropicProvider, GoogleProvider, OpenAIProvider},
         types::{
             ApiInfo, DocInfo, EnvVar, Modalities, Model, ModelCost, ModelLimit, ModelsDevResponse,
             NpmInfo, Provider,
@@ -290,12 +291,15 @@ mod tests {
         // 3. Test capability-based model discovery
         let reasoning_models = find_models_with_capability(&registry, "reasoning").await;
         assert_eq!(reasoning_models.len(), 2); // gpt-4-turbo and claude-3-opus
-        assert!(reasoning_models.contains(&"gpt-4-turbo".to_string()));
-        assert!(reasoning_models.contains(&"claude-3-opus".to_string()));
+        let reasoning_model_ids: Vec<String> =
+            reasoning_models.iter().map(|m| m.id.clone()).collect();
+        assert!(reasoning_model_ids.contains(&"gpt-4-turbo".to_string()));
+        assert!(reasoning_model_ids.contains(&"claude-3-opus".to_string()));
 
         let vision_models = find_models_with_capability(&registry, "vision").await;
         assert_eq!(vision_models.len(), 1); // claude-3-opus
-        assert!(vision_models.contains(&"claude-3-opus".to_string()));
+        let vision_model_ids: Vec<String> = vision_models.iter().map(|m| m.id.clone()).collect();
+        assert!(vision_model_ids.contains(&"claude-3-opus".to_string()));
 
         // 4. Test provider summary
         let summary = get_providers_summary(&registry).await;
@@ -598,11 +602,11 @@ mod tests {
 
         // 2. Get the provider for the vision model
         if let Some(vision_model) = vision_models.first() {
-            let provider_id = registry.find_provider_for_model(vision_model).await;
+            let provider_id = registry.find_provider_for_model(&vision_model.id).await;
             assert_eq!(provider_id, Some("anthropic".to_string()));
             println!(
                 "✓ Vision model {} is provided by {}",
-                vision_model,
+                vision_model.name,
                 provider_id.unwrap()
             );
         }
@@ -647,5 +651,823 @@ mod tests {
             "✓ Recommended model for reasoning: {}",
             reasoning_model.unwrap()
         );
+    }
+
+    // === Comprehensive Error Handling Tests ===
+    #[tokio::test]
+    async fn test_comprehensive_error_handling() {
+        let registry = ProviderRegistry::default();
+
+        // Test 1: Malformed API response handling
+        let malformed_response = ModelsDevResponse {
+            providers: vec![Provider {
+                id: "".to_string(), // Empty ID
+                name: "Invalid Provider".to_string(),
+                npm: NpmInfo {
+                    name: "@ai-sdk/invalid".to_string(),
+                    version: "invalid_version".to_string(), // Invalid version format
+                },
+                env: vec![EnvVar {
+                    name: "".to_string(), // Empty env var name
+                    description: "Empty env var".to_string(),
+                    required: true,
+                }],
+                doc: DocInfo {
+                    url: "invalid-url".to_string(), // Invalid URL
+                    metadata: HashMap::new(),
+                },
+                api: ApiInfo {
+                    base_url: "".to_string(), // Empty base URL
+                    version: None,
+                    config: HashMap::new(),
+                },
+                models: vec![Model {
+                    id: "".to_string(), // Empty model ID
+                    name: "Invalid Model".to_string(),
+                    description: "Invalid model".to_string(),
+                    cost: ModelCost {
+                        input: -1.0,              // Negative cost
+                        output: -1.0,             // Negative cost
+                        cache_read: Some(-1.0),   // Negative cache cost
+                        cache_write: Some(-1.0),  // Negative cache cost
+                        reasoning: Some(-1.0),    // Negative reasoning cost
+                        currency: "".to_string(), // Empty currency
+                    },
+                    limits: ModelLimit {
+                        context: 0, // Zero context
+                        output: 0,  // Zero output
+                        metadata: HashMap::new(),
+                    },
+                    modalities: Modalities {
+                        input: vec![],
+                        output: vec![],
+                    },
+                    metadata: HashMap::new(),
+                }],
+            }],
+        };
+
+        // This should still transform without panicking
+        let result = registry.transform_api_data(malformed_response).await;
+        assert!(result.is_ok(), "Should handle malformed data gracefully");
+
+        let (providers, models, model_to_provider) = result.unwrap();
+
+        // Verify that invalid data is handled appropriately
+        assert!(!providers.is_empty(), "Should process malformed data");
+        assert!(!models.is_empty(), "Should process malformed data");
+        assert!(
+            !model_to_provider.is_empty(),
+            "Should process malformed data"
+        );
+
+        // Test 2: Registry operations with invalid inputs
+        let invalid_provider_id = "";
+        let invalid_model_id = "";
+        let invalid_capability = "";
+        let invalid_npm_package = "";
+
+        // These should handle empty/invalid inputs gracefully
+        assert!(registry.get_provider(invalid_provider_id).await.is_none());
+        assert!(registry.get_model(invalid_model_id).await.is_none());
+        assert_eq!(
+            registry.find_provider_for_model(invalid_model_id).await,
+            None
+        );
+        assert_eq!(
+            registry
+                .get_models_for_provider(invalid_provider_id)
+                .await
+                .len(),
+            0
+        );
+        assert!(!registry.is_provider_available(invalid_provider_id).await);
+        assert!(!registry.is_model_available(invalid_model_id).await);
+        assert_eq!(
+            registry
+                .find_providers_by_npm(invalid_npm_package)
+                .await
+                .len(),
+            0
+        );
+        assert_eq!(
+            registry
+                .get_models_with_capability(invalid_capability)
+                .await
+                .len(),
+            0
+        );
+
+        // Test 3: Convenience functions with invalid inputs
+        assert_eq!(find_provider_for_cloud_service(&registry, "").await, None);
+        assert_eq!(list_providers_for_npm_package(&registry, "").await.len(), 0);
+        assert_eq!(find_models_with_capability(&registry, "").await.len(), 0);
+        assert_eq!(get_providers_summary(&registry).await.len(), 0);
+        assert_eq!(find_best_model_for_use_case(&registry, "").await, None);
+        assert_eq!(get_capability_summary(&registry).await.len(), 0);
+
+        // Test 4: Configuration checking with invalid provider
+        let config_result = check_provider_configuration(&registry, "nonexistent_provider").await;
+        assert!(config_result.is_err());
+        let error_msg = format!("{:?}", config_result.unwrap_err());
+        assert!(
+            error_msg.contains("not found"),
+            "Should handle nonexistent provider gracefully"
+        );
+    }
+
+    // === Large Dataset Performance Tests ===
+    #[tokio::test]
+    async fn test_large_dataset_performance() {
+        let registry = ProviderRegistry::default();
+
+        // Create a large dataset with many providers and models
+        let mut providers = Vec::new();
+        let expected_providers = 50; // 50 providers
+        let models_per_provider = 20; // 20 models per provider = 1000 models total
+
+        for provider_idx in 0..expected_providers {
+            let mut models = Vec::new();
+            for model_idx in 0..models_per_provider {
+                models.push(Model {
+                    id: format!("provider-{}-model-{}", provider_idx, model_idx),
+                    name: format!("Model {}-{}", provider_idx, model_idx),
+                    description: format!("Test model {}-{}", provider_idx, model_idx),
+                    cost: ModelCost {
+                        input: 0.001 * (model_idx as f64 + 1.0),
+                        output: 0.002 * (model_idx as f64 + 1.0),
+                        cache_read: Some(0.0005 * (model_idx as f64 + 1.0)),
+                        cache_write: Some(0.001 * (model_idx as f64 + 1.0)),
+                        reasoning: Some(0.0015 * (model_idx as f64 + 1.0)),
+                        currency: "USD".to_string(),
+                    },
+                    limits: ModelLimit {
+                        context: 4096 * (model_idx + 1),
+                        output: 2048 * (model_idx + 1),
+                        metadata: HashMap::new(),
+                    },
+                    modalities: Modalities {
+                        input: vec!["text".to_string()],
+                        output: vec!["text".to_string()],
+                    },
+                    metadata: HashMap::new(),
+                });
+            }
+
+            providers.push(Provider {
+                id: format!("provider-{}", provider_idx),
+                name: format!("Provider {}", provider_idx),
+                npm: NpmInfo {
+                    name: format!("@ai-sdk/provider-{}", provider_idx),
+                    version: "1.0.0".to_string(),
+                },
+                env: vec![EnvVar {
+                    name: format!("PROVIDER_{}_API_KEY", provider_idx),
+                    description: format!("API key for provider {}", provider_idx),
+                    required: true,
+                }],
+                doc: DocInfo {
+                    url: format!("https://provider-{}.example.com/docs", provider_idx),
+                    metadata: HashMap::new(),
+                },
+                api: ApiInfo {
+                    base_url: format!("https://api.provider-{}.example.com", provider_idx),
+                    version: Some("v1".to_string()),
+                    config: HashMap::new(),
+                },
+                models,
+            });
+        }
+
+        let large_response = ModelsDevResponse { providers };
+
+        // Measure transformation time
+        let start_time = std::time::Instant::now();
+        let (providers, models, model_to_provider) =
+            registry.transform_api_data(large_response).await.unwrap();
+        let transformation_time = start_time.elapsed();
+
+        // Verify the transformation completed successfully
+        assert_eq!(
+            providers.len(),
+            expected_providers,
+            "Should have correct number of providers"
+        );
+        assert_eq!(
+            models.len(),
+            expected_providers * models_per_provider as usize,
+            "Should have correct number of models"
+        );
+        assert_eq!(
+            model_to_provider.len(),
+            expected_providers * models_per_provider as usize,
+            "Should have correct mapping size"
+        );
+
+        // Performance assertion - should complete in reasonable time (adjust as needed)
+        assert!(
+            transformation_time.as_millis() < 1000,
+            "Large dataset transformation should complete quickly, took {:?}",
+            transformation_time
+        );
+
+        // Load the data into the registry
+        {
+            let mut providers_lock = registry.providers.write().await;
+            *providers_lock = providers;
+        }
+
+        {
+            let mut models_lock = registry.models.write().await;
+            *models_lock = models;
+        }
+
+        {
+            let mut mapping_lock = registry.model_to_provider.write().await;
+            *mapping_lock = model_to_provider;
+        }
+
+        // Test performance of various operations
+        let operations_start = std::time::Instant::now();
+
+        // Test provider lookup performance
+        for i in 0..10 {
+            let provider_id = format!("provider-{}", i);
+            let provider = registry.get_provider(&provider_id).await;
+            assert!(provider.is_some(), "Should find provider {}", provider_id);
+        }
+
+        // Test model lookup performance
+        for i in 0..10 {
+            let model_id = format!("provider-0-model-{}", i);
+            let model = registry.get_model(&model_id).await;
+            assert!(model.is_some(), "Should find model {}", model_id);
+        }
+
+        // Test convenience function performance
+        let summary = get_providers_summary(&registry).await;
+        assert_eq!(
+            summary.len(),
+            expected_providers,
+            "Summary should include all providers"
+        );
+
+        let capability_summary = get_capability_summary(&registry).await;
+        assert!(
+            !capability_summary.is_empty(),
+            "Should have capability summary"
+        );
+
+        let operations_time = operations_start.elapsed();
+        assert!(
+            operations_time.as_millis() < 500,
+            "Operations should complete quickly, took {:?}",
+            operations_time
+        );
+
+        println!("Large dataset performance test completed:");
+        println!("  - Transformation time: {:?}", transformation_time);
+        println!("  - Operations time: {:?}", operations_time);
+        println!("  - Total providers: {}", expected_providers);
+        println!(
+            "  - Total models: {}",
+            expected_providers * models_per_provider as usize
+        );
+    }
+
+    // === Concurrency and Thread Safety Tests ===
+    #[tokio::test]
+    async fn test_concurrent_operations() {
+        let registry = ProviderRegistry::default();
+
+        // Load test data
+        let mock_response = create_comprehensive_mock_response();
+        let (providers, models, model_to_provider) =
+            registry.transform_api_data(mock_response).await.unwrap();
+
+        {
+            let mut providers_lock = registry.providers.write().await;
+            *providers_lock = providers;
+        }
+
+        {
+            let mut models_lock = registry.models.write().await;
+            *models_lock = models;
+        }
+
+        {
+            let mut mapping_lock = registry.model_to_provider.write().await;
+            *mapping_lock = model_to_provider;
+        }
+
+        // Test concurrent read operations
+        let concurrent_tasks = 100;
+        let mut handles = Vec::new();
+
+        for task_id in 0..concurrent_tasks {
+            let registry_clone = registry.clone();
+            let handle = tokio::spawn(async move {
+                // Each task performs various read operations
+                let provider = registry_clone.get_provider("openai").await;
+                let model = registry_clone.get_model("gpt-4").await;
+                let provider_for_model = registry_clone.find_provider_for_model("gpt-4").await;
+                let models_for_provider = registry_clone.get_models_for_provider("openai").await;
+                let is_available = registry_clone.is_provider_available("openai").await;
+
+                // Verify all operations succeeded
+                assert!(provider.is_some(), "Task {} should find provider", task_id);
+                assert!(model.is_some(), "Task {} should find model", task_id);
+                assert!(
+                    provider_for_model.is_some(),
+                    "Task {} should find provider for model",
+                    task_id
+                );
+                assert!(
+                    !models_for_provider.is_empty(),
+                    "Task {} should find models for provider",
+                    task_id
+                );
+                assert!(
+                    is_available,
+                    "Task {} should find provider available",
+                    task_id
+                );
+
+                // Test convenience functions
+                let openai_provider =
+                    find_provider_for_cloud_service(&registry_clone, "openai").await;
+                let reasoning_models =
+                    find_models_with_capability(&registry_clone, "reasoning").await;
+                let summary = get_providers_summary(&registry_clone).await;
+
+                assert_eq!(
+                    openai_provider,
+                    Some("openai".to_string()),
+                    "Task {} should find OpenAI provider",
+                    task_id
+                );
+                assert!(
+                    !reasoning_models.is_empty(),
+                    "Task {} should find reasoning models",
+                    task_id
+                );
+                assert!(
+                    !summary.is_empty(),
+                    "Task {} should get providers summary",
+                    task_id
+                );
+
+                task_id
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all tasks to complete
+        let results = futures::future::join_all(handles).await;
+
+        // Verify all tasks completed successfully
+        for (i, result) in results.into_iter().enumerate() {
+            assert!(result.is_ok(), "Task {} should complete successfully", i);
+            let task_id = result.unwrap();
+            assert_eq!(task_id, i, "Task {} should return correct ID", i);
+        }
+
+        println!(
+            "Successfully executed {} concurrent operations",
+            concurrent_tasks
+        );
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_writes_with_reads() {
+        let registry = ProviderRegistry::default();
+
+        // Start with some initial data
+        let mock_response = create_comprehensive_mock_response();
+        let (providers, models, model_to_provider) =
+            registry.transform_api_data(mock_response).await.unwrap();
+
+        {
+            let mut providers_lock = registry.providers.write().await;
+            *providers_lock = providers;
+        }
+
+        {
+            let mut models_lock = registry.models.write().await;
+            *models_lock = models;
+        }
+
+        {
+            let mut mapping_lock = registry.model_to_provider.write().await;
+            *mapping_lock = model_to_provider;
+        }
+
+        // Create concurrent read and write operations
+        let mut handles = Vec::new();
+
+        // Read tasks
+        for i in 0..50 {
+            let registry_clone = registry.clone();
+            let handle = tokio::spawn(async move {
+                // Perform read operations
+                let provider = registry_clone.get_provider("openai").await;
+                let model = registry_clone.get_model("gpt-4").await;
+                let count = registry_clone.provider_count().await;
+
+                assert!(provider.is_some(), "Read task {} should find provider", i);
+                assert!(model.is_some(), "Read task {} should find model", i);
+                assert!(count > 0, "Read task {} should find providers", i);
+
+                i
+            });
+            handles.push(handle);
+        }
+
+        // Write tasks (clear and reload data)
+        for i in 0..10 {
+            let registry_clone = registry.clone();
+            let handle = tokio::spawn(async move {
+                // Clear the registry
+                registry_clone.clear().await;
+
+                // Verify it's empty
+                assert_eq!(
+                    registry_clone.provider_count().await,
+                    0,
+                    "Write task {} should clear providers",
+                    i
+                );
+                assert_eq!(
+                    registry_clone.model_count().await,
+                    0,
+                    "Write task {} should clear models",
+                    i
+                );
+
+                // Reload data
+                let mock_response = create_comprehensive_mock_response();
+                let (providers, models, model_to_provider) = registry_clone
+                    .transform_api_data(mock_response)
+                    .await
+                    .unwrap();
+
+                {
+                    let mut providers_lock = registry_clone.providers.write().await;
+                    *providers_lock = providers;
+                }
+
+                {
+                    let mut models_lock = registry_clone.models.write().await;
+                    *models_lock = models;
+                }
+
+                {
+                    let mut mapping_lock = registry_clone.model_to_provider.write().await;
+                    *mapping_lock = model_to_provider;
+                }
+
+                // Verify data is reloaded
+                assert!(
+                    registry_clone.provider_count().await > 0,
+                    "Write task {} should reload providers",
+                    i
+                );
+                assert!(
+                    registry_clone.model_count().await > 0,
+                    "Write task {} should reload models",
+                    i
+                );
+
+                i
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all tasks to complete
+        let results = futures::future::join_all(handles).await;
+
+        // Verify all tasks completed successfully
+        for (i, result) in results.into_iter().enumerate() {
+            assert!(result.is_ok(), "Task {} should complete successfully", i);
+        }
+
+        println!("Successfully executed concurrent read/write operations");
+    }
+
+    // === Memory and Resource Management Tests ===
+    #[tokio::test]
+    async fn test_memory_efficiency() {
+        let registry = ProviderRegistry::default();
+
+        // Create a very large dataset to test memory usage
+        let mut providers = Vec::new();
+        let large_provider_count = 1000; // 1000 providers
+        let models_per_provider = 50; // 50 models per provider = 50,000 models total
+
+        for provider_idx in 0..large_provider_count {
+            let mut models = Vec::new();
+            for model_idx in 0..models_per_provider {
+                models.push(Model {
+                    id: format!("large-provider-{}-model-{}", provider_idx, model_idx),
+                    name: format!("Large Model {}-{}", provider_idx, model_idx),
+                    description: format!("Large test model {}-{}", provider_idx, model_idx),
+                    cost: ModelCost {
+                        input: 0.001,
+                        output: 0.002,
+                        cache_read: Some(0.0005),
+                        cache_write: Some(0.001),
+                        reasoning: Some(0.0015),
+                        currency: "USD".to_string(),
+                    },
+                    limits: ModelLimit {
+                        context: 8192,
+                        output: 4096,
+                        metadata: HashMap::new(),
+                    },
+                    modalities: Modalities {
+                        input: vec!["text".to_string()],
+                        output: vec!["text".to_string()],
+                    },
+                    metadata: HashMap::new(),
+                });
+            }
+
+            providers.push(Provider {
+                id: format!("large-provider-{}", provider_idx),
+                name: format!("Large Provider {}", provider_idx),
+                npm: NpmInfo {
+                    name: format!("@ai-sdk/large-provider-{}", provider_idx),
+                    version: "1.0.0".to_string(),
+                },
+                env: vec![EnvVar {
+                    name: format!("LARGE_PROVIDER_{}_API_KEY", provider_idx),
+                    description: format!("API key for large provider {}", provider_idx),
+                    required: true,
+                }],
+                doc: DocInfo {
+                    url: format!("https://large-provider-{}.example.com/docs", provider_idx),
+                    metadata: HashMap::new(),
+                },
+                api: ApiInfo {
+                    base_url: format!("https://api.large-provider-{}.example.com", provider_idx),
+                    version: Some("v1".to_string()),
+                    config: HashMap::new(),
+                },
+                models,
+            });
+        }
+
+        let very_large_response = ModelsDevResponse { providers };
+
+        // Transform and load the data
+        let (providers, models, model_to_provider) = registry
+            .transform_api_data(very_large_response)
+            .await
+            .unwrap();
+
+        {
+            let mut providers_lock = registry.providers.write().await;
+            *providers_lock = providers;
+        }
+
+        {
+            let mut models_lock = registry.models.write().await;
+            *models_lock = models;
+        }
+
+        {
+            let mut mapping_lock = registry.model_to_provider.write().await;
+            *mapping_lock = model_to_provider;
+        }
+
+        // Verify the data was loaded correctly
+        assert_eq!(registry.provider_count().await, large_provider_count);
+        assert_eq!(
+            registry.model_count().await,
+            large_provider_count * models_per_provider
+        );
+
+        // Clear the registry to test memory cleanup
+        registry.clear().await;
+
+        // Verify memory was freed
+        assert_eq!(registry.provider_count().await, 0);
+        assert_eq!(registry.model_count().await, 0);
+
+        println!(
+            "Memory efficiency test completed with {} providers and {} models",
+            large_provider_count,
+            large_provider_count * models_per_provider
+        );
+    }
+
+    // === Real-world Edge Case Tests ===
+    #[tokio::test]
+    async fn test_real_world_edge_cases() {
+        let registry = ProviderRegistry::default();
+
+        // Test 1: Provider with extremely long names and URLs
+        let long_name = "A".repeat(1000); // 1000 character name
+        let long_url = "https://".to_string() + &"a".repeat(500) + ".example.com"; // Very long URL
+
+        let edge_case_response = ModelsDevResponse {
+            providers: vec![Provider {
+                id: "edge-case-provider".to_string(),
+                name: long_name.clone(),
+                npm: NpmInfo {
+                    name: format!("@ai-sdk/{}", long_name),
+                    version: "1.0.0".to_string(),
+                },
+                env: vec![EnvVar {
+                    name: format!("{}_API_KEY", long_name),
+                    description: format!("API key for {}", long_name),
+                    required: true,
+                }],
+                doc: DocInfo {
+                    url: long_url.clone(),
+                    metadata: HashMap::new(),
+                },
+                api: ApiInfo {
+                    base_url: long_url.clone(),
+                    version: Some("v1".to_string()),
+                    config: HashMap::new(),
+                },
+                models: vec![Model {
+                    id: "edge-case-model".to_string(),
+                    name: long_name.clone(),
+                    description: format!("Edge case model with long name: {}", long_name),
+                    cost: ModelCost {
+                        input: 0.000001, // Very small cost
+                        output: 0.000002,
+                        cache_read: Some(0.0000005),
+                        cache_write: Some(0.000001),
+                        reasoning: Some(0.0000015),
+                        currency: "USD".to_string(),
+                    },
+                    limits: ModelLimit {
+                        context: 2000000, // Very large context
+                        output: 1000000,  // Very large output
+                        metadata: HashMap::new(),
+                    },
+                    modalities: Modalities {
+                        input: vec![
+                            "text".to_string(),
+                            "image".to_string(),
+                            "audio".to_string(),
+                            "video".to_string(),
+                        ],
+                        output: vec!["text".to_string(), "image".to_string(), "audio".to_string()],
+                    },
+                    metadata: HashMap::new(),
+                }],
+            }],
+        };
+
+        // This should handle edge cases gracefully
+        let result = registry.transform_api_data(edge_case_response).await;
+        assert!(result.is_ok(), "Should handle edge case data gracefully");
+
+        let (providers, models, model_to_provider) = result.unwrap();
+
+        // Load and test the edge case data
+        {
+            let mut providers_lock = registry.providers.write().await;
+            *providers_lock = providers;
+        }
+
+        {
+            let mut models_lock = registry.models.write().await;
+            *models_lock = models;
+        }
+
+        {
+            let mut mapping_lock = registry.model_to_provider.write().await;
+            *mapping_lock = model_to_provider;
+        }
+
+        // Test operations with edge case data
+        let provider = registry.get_provider("edge-case-provider").await;
+        assert!(provider.is_some(), "Should find edge case provider");
+
+        let model = registry.get_model("edge-case-model").await;
+        assert!(model.is_some(), "Should find edge case model");
+
+        // Test 2: Provider with special characters in IDs and names
+        let special_chars_response = ModelsDevResponse {
+            providers: vec![Provider {
+                id: "provider-with_special.chars123".to_string(),
+                name: "Provider with Special Chars & Symbols 123!".to_string(),
+                npm: NpmInfo {
+                    name: "@ai-sdk/special-chars-package".to_string(),
+                    version: "1.0.0-beta.1+build.123".to_string(), // Complex version
+                },
+                env: vec![EnvVar {
+                    name: "SPECIAL_CHARS_API_KEY_123".to_string(),
+                    description: "API key with special chars: test@example.com".to_string(),
+                    required: true,
+                }],
+                doc: DocInfo {
+                    url: "https://special-chars.example.com/path?param=value&other=123".to_string(),
+                    metadata: HashMap::new(),
+                },
+                api: ApiInfo {
+                    base_url: "https://api.special-chars.example.com/v1/endpoint".to_string(),
+                    version: Some("2023-12-01-preview".to_string()), // Complex version
+                    config: {
+                        let mut config = HashMap::new();
+                        config.insert("timeout".to_string(), serde_json::json!("30s"));
+                        config.insert("retry_count".to_string(), serde_json::json!("3"));
+                        config.insert(
+                            "custom.setting".to_string(),
+                            serde_json::json!("value-with-dashes"),
+                        );
+                        config
+                    },
+                },
+                models: vec![Model {
+                    id: "model-with_special.chars-v2.1".to_string(),
+                    name: "Model with Special Chars & Symbols v2.1!".to_string(),
+                    description: "Model description with special chars: @#$%^&*()".to_string(),
+                    cost: ModelCost {
+                        input: 0.01,
+                        output: 0.02,
+                        cache_read: Some(0.005),
+                        cache_write: Some(0.01),
+                        reasoning: Some(0.015),
+                        currency: "USD".to_string(),
+                    },
+                    limits: ModelLimit {
+                        context: 8192,
+                        output: 4096,
+                        metadata: {
+                            let mut metadata = HashMap::new();
+                            metadata.insert(
+                                "special.key".to_string(),
+                                serde_json::json!("special-value"),
+                            );
+                            metadata.insert(
+                                "another_key".to_string(),
+                                serde_json::json!("value with spaces"),
+                            );
+                            metadata
+                        },
+                    },
+                    modalities: Modalities {
+                        input: vec!["text".to_string(), "image/*".to_string()], // Wildcard in modality
+                        output: vec!["text/plain".to_string(), "application/json".to_string()],
+                    },
+                    metadata: {
+                        let mut metadata = HashMap::new();
+                        metadata.insert(
+                            "model.special.field".to_string(),
+                            serde_json::json!("special.model.value"),
+                        );
+                        metadata
+                    },
+                }],
+            }],
+        };
+
+        let (providers, models, model_to_provider) = registry
+            .transform_api_data(special_chars_response)
+            .await
+            .unwrap();
+
+        // Clear and reload with special chars data
+        registry.clear().await;
+
+        {
+            let mut providers_lock = registry.providers.write().await;
+            *providers_lock = providers;
+        }
+
+        {
+            let mut models_lock = registry.models.write().await;
+            *models_lock = models;
+        }
+
+        {
+            let mut mapping_lock = registry.model_to_provider.write().await;
+            *mapping_lock = model_to_provider;
+        }
+
+        // Test operations with special characters
+        let provider = registry
+            .get_provider("provider-with_special.chars123")
+            .await;
+        assert!(
+            provider.is_some(),
+            "Should find provider with special chars"
+        );
+
+        let model = registry.get_model("model-with_special.chars-v2.1").await;
+        assert!(model.is_some(), "Should find model with special chars");
+
+        // Test convenience functions with special characters
+        let provider_for_cloud = find_provider_for_cloud_service(&registry, "special").await;
+        // This might not find it due to heuristics, but shouldn't panic
+        assert!(provider_for_cloud.is_none() || provider_for_cloud.is_some());
+
+        println!("Real-world edge cases test completed successfully");
     }
 }

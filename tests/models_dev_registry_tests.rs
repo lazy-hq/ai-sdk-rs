@@ -4,7 +4,7 @@
 #[cfg(test)]
 mod tests {
     use aisdk::models_dev::{
-        ModelInfo, ModelsDevClient, ModelsDevError, ProviderInfo, ProviderRegistry,
+        ModelInfo, ModelsDevClient, ProviderInfo, ProviderRegistry,
         types::{
             ApiInfo, DocInfo, Modalities, Model, ModelCost, ModelLimit, ModelsDevResponse, NpmInfo,
             Provider,

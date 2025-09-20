@@ -12,6 +12,7 @@ An open-source Rust library for building AI-powered applications, inspired by th
 ## Key Features
 
 - **OpenAI Provider Support**: Initial support for OpenAI models with text generation and streaming.
+- **Models.dev Integration**: Dynamic provider discovery and model selection through models.dev API.
 - **Type-Safe API**: Built with Rust's type system for reliability.
 - **Asynchronous**: Uses Tokio for async operations.
 - **Prompt Templating**: Filesystem-based prompts using Tera templates (coming soon).
@@ -29,6 +30,18 @@ Enable the OpenAI feature:
 
 ```toml
 aisdk = { version = "0.1.0", features = ["openai"] }
+```
+
+Enable the models.dev feature for dynamic provider discovery:
+
+```toml
+aisdk = { version = "0.1.0", features = ["models-dev"] }
+```
+
+Enable all features:
+
+```toml
+aisdk = { version = "0.1.0", features = ["full"] }
 ```
 
 ## Usage
@@ -108,6 +121,66 @@ The file in `./prompts` contains various example prompt files to demonstrate the
 - **Tokio**: Async runtime.
 - **Tera**: Template engine for prompts.
 - **async-openai**: OpenAI API client.
+- **reqwest**: HTTP client for models.dev API.
+- **serde**: JSON serialization and deserialization.
+
+## Models.dev Feature
+
+The `models-dev` feature provides comprehensive integration with the models.dev API for dynamic provider discovery and model selection.
+
+### Key Capabilities
+
+- **Dynamic Provider Discovery**: Automatically discover AI model providers through the models.dev API
+- **Intelligent Model Selection**: Find the best models based on capabilities, cost, and use cases
+- **Comprehensive Caching**: Memory and disk caching to minimize API calls and improve performance
+- **Configuration Validation**: Automatically validate provider configurations and environment variables
+- **Provider Integration**: Seamless integration with existing AISDK providers
+
+### Quick Start
+
+```rust
+use aisdk::models_dev::{ProviderRegistry, find_best_model_for_use_case};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Create a registry with default client
+    let registry = ProviderRegistry::with_default_client();
+    
+    // Fetch the latest provider and model data
+    registry.refresh().await?;
+    
+    // Find the best model for your use case
+    let chat_model = find_best_model_for_use_case(&registry, "chat").await;
+    let code_model = find_best_model_for_use_case(&registry, "code").await;
+    
+    println!("Best chat model: {:?}", chat_model);
+    println!("Best code model: {:?}", code_model);
+    
+    Ok(())
+}
+```
+
+### Examples
+
+The library includes several examples demonstrating the models.dev feature:
+
+```bash
+# Basic client usage with caching
+cargo run --example models_dev_client_example --features models-dev
+
+# Registry operations and provider discovery
+cargo run --example models_dev_registry_example --features models-dev
+
+# Convenience functions and integration patterns
+cargo run --example models_dev_convenience_example --features models-dev
+
+# Complete end-to-end integration example
+cargo run --example models_dev_complete_integration --features models-dev
+```
+
+### Documentation
+
+For detailed documentation, see [MODELS_DEV_FEATURE.md](docs/MODELS_DEV_FEATURE.md).
 
 ## Contributing
 
