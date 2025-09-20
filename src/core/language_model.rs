@@ -5,15 +5,15 @@
 //! underlying implementation details of different AI providers, offering a
 //! unified interface for various operations like text generation or streaming.
 
-use std::ops::{Deref, DerefMut};
-
 use crate::core::types::Message;
 use crate::core::utils::resolve_message;
-use crate::core::{LanguageModelResponse, LanguageModelStreamResponse};
 use crate::error::{Error, Result};
 use async_trait::async_trait;
 use derive_builder::Builder;
+use futures::Stream;
 use serde::{Deserialize, Serialize};
+use std::ops::{Deref, DerefMut};
+use std::pin::Pin;
 
 // ============================================================================
 // Section: traits
@@ -108,6 +108,52 @@ impl LanguageModelOptions {
     pub fn builder() -> LanguageModelOptionsBuilder {
         LanguageModelOptionsBuilder::default()
     }
+}
+
+// TODO: constract a standard response type
+/// Response from a language model.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LanguageModelResponse {
+    /// The generated text.
+    pub text: String,
+
+    /// The model that generated the response.
+    pub model: Option<String>,
+
+    /// The reason the model stopped generating text.
+    pub stop_reason: Option<String>,
+}
+
+impl LanguageModelResponse {
+    /// Creates a new response with the generated text.
+    pub fn new(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            model: None,
+            stop_reason: None,
+        }
+    }
+}
+
+/// A response from a streaming language model.
+pub struct LanguageModelStreamResponse {
+    /// A stream of responses from the language model.
+    pub stream: StreamChunk,
+
+    /// The model that generated the response.
+    pub model: Option<String>,
+}
+
+/// Stream of responses from mapped to a common interface.
+pub type StreamChunk = Pin<Box<dyn Stream<Item = Result<StreamChunkData>> + Send>>;
+
+/// Chunked response from a language model.
+pub struct StreamChunkData {
+    /// The generated text.
+    pub text: String,
+
+    /// The reason the model stopped generating text.
+    pub stop_reason: Option<String>,
 }
 
 /// Options for text generation requests such as `generate_text` and `stream_text`.
@@ -324,11 +370,26 @@ pub struct GenerateTextResponse {
     pub text: String,
 }
 
-impl GenerateTextResponse {
-    /// Creates a new response with the generated text.
-    pub fn new(text: impl Into<String>) -> Self {
-        Self { text: text.into() }
+/// Core struct for streaming text generation using a language model.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamText<M: LanguageModel> {
+    pub options: GenerateOptions<M>,
+}
+
+impl<M: LanguageModel> StreamText<M> {
+    pub fn builder() -> GenerateOptionsBuilder<M> {
+        GenerateOptionsBuilder::default()
     }
+}
+
+//TODO: add standard response fields
+/// Response from a stream call on `StreamText`.
+pub struct StreamTextResponse {
+    /// A stream of responses from the language model.
+    pub stream: StreamChunk,
+
+    /// The model that generated the response.
+    pub model: Option<String>,
 }
 
 // ============================================================================
@@ -340,15 +401,6 @@ impl<M: LanguageModel> GenerateText<M> {
     ///
     /// Generate a text and call tools for a given prompt using a language model.
     /// This function does not stream the output. If you want to stream the output, use `StreamText` instead.
-    ///
-    /// # Arguments
-    ///
-    /// * `model` - A language model that implements the `LanguageModel` trait.
-    ///
-    /// * `options` - A `GenerateTextCallOptions` struct containing the model, prompt,
-    ///   and other parameters for the request.
-    ///
-    /// # Errors
     ///
     /// Returns an `Error` if the underlying model fails to generate a response.
     pub async fn generate(&mut self) -> Result<GenerateTextResponse> {
@@ -374,7 +426,48 @@ impl<M: LanguageModel> GenerateText<M> {
             )
             .await?;
 
-        let result = GenerateTextResponse::new(response.text);
+        let result = GenerateTextResponse {
+            text: response.text,
+        };
+
+        Ok(result)
+    }
+}
+
+impl<M: LanguageModel> StreamText<M> {
+    /// Generates Streaming text using a specified language model.
+    ///
+    /// Generate a text and call tools for a given prompt using a language model.
+    /// This function streams the output. If you do not want to stream the output, use `GenerateText` instead.
+    ///
+    /// Returns an `Error` if the underlying model fails to generate a response.
+    pub async fn stream(&mut self) -> Result<StreamTextResponse> {
+        let (system_prompt, messages) = resolve_message(
+            &self.options.system,
+            &self.options.prompt,
+            &self.options.messages,
+        );
+
+        let response = self
+            .options
+            .model
+            .generate_stream(
+                LanguageModelOptions::builder()
+                    .system(system_prompt)
+                    .messages(messages)
+                    .max_output_tokens(self.options.max_output_tokens)
+                    .temperature(self.options.temperature)
+                    .top_p(self.options.top_p)
+                    .top_k(self.options.top_k)
+                    .stop_sequences(self.options.stop_sequences.clone())
+                    .build()?,
+            )
+            .await?;
+
+        let result = StreamTextResponse {
+            stream: Box::pin(response.stream),
+            model: response.model,
+        };
 
         Ok(result)
     }
