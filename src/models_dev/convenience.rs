@@ -1,9 +1,12 @@
 //! Convenience functions for common models.dev operations.
 //!
-//! This module provides high-level convenience functions that simplify common
-//! tasks when working with the models.dev API and provider registry.
+//! This module provides high-level, user-friendly wrapper functions around the
+//! ProviderRegistry methods to simplify common tasks like finding providers,
+//! filtering models, and getting summaries.
 
-use crate::models_dev::ProviderRegistry;
+use std::collections::HashMap;
+
+use crate::models_dev::registry::{ModelInfo, ProviderRegistry};
 
 /// Find a provider for a specific cloud service.
 ///
@@ -116,44 +119,34 @@ pub async fn list_providers_for_npm_package(
     providers
 }
 
-/// Find models that support a specific capability.
+/// Find models with a specific capability.
 ///
-/// This is a convenience wrapper around the registry's get_models_with_capability
-/// method that provides a more user-friendly interface.
+/// This function filters models based on their capabilities such as reasoning,
+/// tool calling, attachment support, or vision capabilities.
 ///
 /// # Arguments
 /// * `registry` - The provider registry to search in
 /// * `capability` - The capability to filter by ("reasoning", "tool_call", "attachment", "vision")
 ///
 /// # Returns
-/// * A vector of model IDs that have the specified capability
+/// * `Vec<ModelInfo>` - A vector of model information for models with the specified capability
 ///
 /// # Examples
-///
 /// ```rust
-/// # use aisdk::models_dev::ProviderRegistry;
-/// # use aisdk::models_dev::find_models_with_capability;
-/// #[tokio::main]
-/// async fn main() {
-///     let registry = ProviderRegistry::with_default_client();
-///     // Note: In a real application, you would call:
-///     // registry.refresh().await.unwrap();
-///     // For doc tests, we'll skip the refresh to avoid network calls
-///     
-///     let reasoning_models = find_models_with_capability(&registry, "reasoning").await;
-///     // This will return an empty vector since the registry is empty without refresh
-///     assert!(reasoning_models.is_empty());
-///     
-///     let vision_models = find_models_with_capability(&registry, "vision").await;
-///     assert!(vision_models.is_empty());
-/// }
+/// use topaz::models_dev::{ProviderRegistry, find_models_with_capability};
+///
+/// # async fn example() -> Vec<topaz::models_dev::ModelInfo> {
+/// let registry = ProviderRegistry::default();
+/// // registry.refresh().await.unwrap(); // Load data
+/// let reasoning_models = find_models_with_capability(&registry, "reasoning").await;
+/// reasoning_models
+/// # }
 /// ```
 pub async fn find_models_with_capability(
     registry: &ProviderRegistry,
     capability: &str,
-) -> Vec<String> {
-    let models = registry.get_models_with_capability(capability).await;
-    models.into_iter().map(|m| m.id.clone()).collect()
+) -> Vec<ModelInfo> {
+    registry.get_models_with_capability(capability).await
 }
 
 /// Get all available providers with their models in a structured format.
@@ -304,88 +297,126 @@ pub async fn find_best_model_for_use_case(
     None
 }
 
-/// Check if a provider is properly configured with required environment variables.
+/// Check if a provider's configuration is valid.
 ///
-/// This function checks if all required environment variables for a provider
-/// are set and available.
+/// This function validates that all required environment variables for a provider
+/// are set and have valid values.
 ///
 /// # Arguments
-/// * `registry` - The provider registry to use
+/// * `registry` - The provider registry to check
 /// * `provider_id` - The ID of the provider to check
 ///
 /// # Returns
-/// * Ok(()) if all required environment variables are set
-/// * Err(Vec<String>) with the names of missing environment variables
+/// * `Ok(())` - If the provider configuration is valid
+/// * `Err(Vec<String>)` - A vector of error messages describing configuration issues
 ///
 /// # Examples
-///
 /// ```rust
-/// # use aisdk::models_dev::ProviderRegistry;
-/// # use aisdk::models_dev::check_provider_configuration;
-/// #[tokio::main]
-/// async fn main() {
-///     let registry = ProviderRegistry::with_default_client();
-///     // Note: In a real application, you would call:
-///     // registry.refresh().await.unwrap();
-///     // For doc tests, we'll skip the refresh to avoid network calls
-///     
-///     let result = check_provider_configuration(&registry, "openai").await;
-///     // This will return an error since the provider is not found without refresh
-///     assert!(result.is_err());
+/// use topaz::models_dev::{ProviderRegistry, check_provider_configuration};
+///
+/// # async fn example() -> Result<(), Vec<String>> {
+/// let registry = ProviderRegistry::default();
+/// // registry.refresh().await.unwrap(); // Load data
+/// let result = check_provider_configuration(&registry, "openai").await;
+/// match result {
+///     Ok(()) => println!("Configuration is valid"),
+///     Err(errors) => println!("Configuration errors: {:?}", errors),
 /// }
+/// result
+/// # }
 /// ```
 pub async fn check_provider_configuration(
     registry: &ProviderRegistry,
     provider_id: &str,
 ) -> Result<(), Vec<String>> {
-    let connection_info = registry
-        .get_connection_info(provider_id)
+    let provider = registry
+        .get_provider(provider_id)
         .await
         .ok_or_else(|| vec![format!("Provider '{}' not found", provider_id)])?;
 
-    connection_info.validate_env()
+    let mut errors = Vec::new();
+
+    // Check required environment variables
+    for env_var in &provider.env_vars {
+        if env_var.required {
+            match std::env::var(&env_var.name) {
+                Ok(value) => {
+                    if value.trim().is_empty() {
+                        errors.push(format!(
+                            "Required environment variable '{}' is empty",
+                            env_var.name
+                        ));
+                    }
+                }
+                Err(_) => {
+                    errors.push(format!(
+                        "Required environment variable '{}' is not set",
+                        env_var.name
+                    ));
+                }
+            }
+        }
+    }
+
+    // Check if provider is available
+    if !provider.available {
+        errors.push(format!(
+            "Provider '{}' is marked as unavailable",
+            provider_id
+        ));
+    }
+
+    // Check if provider has any models
+    let models = registry.get_models_for_provider(provider_id).await;
+    if models.is_empty() {
+        errors.push(format!(
+            "Provider '{}' has no available models",
+            provider_id
+        ));
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
 }
 
-/// Get a summary of available models grouped by capability.
+/// Get a summary of all available capabilities and the models that support them.
 ///
-/// This function provides a convenient overview of what capabilities are available
-/// across all models in the registry.
+/// This function returns a HashMap where keys are capability names and values are
+/// vectors of model IDs that support each capability.
 ///
 /// # Arguments
-/// * `registry` - The provider registry to analyze
+/// * `registry` - The provider registry to get capability summary from
 ///
 /// # Returns
-/// * A HashMap mapping capability names to vectors of model IDs
+/// * `HashMap<String, Vec<String>>` - A map of capability names to lists of model IDs
 ///
 /// # Examples
-///
 /// ```rust
-/// # use aisdk::models_dev::ProviderRegistry;
-/// # use aisdk::models_dev::get_capability_summary;
-/// #[tokio::main]
-/// async fn main() {
-///     let registry = ProviderRegistry::with_default_client();
-///     // Note: In a real application, you would call:
-///     // registry.refresh().await.unwrap();
-///     // For doc tests, we'll skip the refresh to avoid network calls
-///     
-///     let capability_summary = get_capability_summary(&registry).await;
-///     // This will return an empty HashMap since the registry is empty without refresh
-///     assert!(capability_summary.is_empty());
+/// use topaz::models_dev::{ProviderRegistry, get_capability_summary};
+///
+/// # async fn example() -> std::collections::HashMap<String, Vec<String>> {
+/// let registry = ProviderRegistry::default();
+/// // registry.refresh().await.unwrap(); // Load data
+/// let capabilities = get_capability_summary(&registry).await;
+/// for (capability, model_ids) in capabilities {
+///     println!("{} capability: {} models", capability, model_ids.len());
 /// }
+/// capabilities
+/// # }
 /// ```
-pub async fn get_capability_summary(
-    registry: &ProviderRegistry,
-) -> std::collections::HashMap<String, Vec<String>> {
-    let mut summary = std::collections::HashMap::new();
+pub async fn get_capability_summary(registry: &ProviderRegistry) -> HashMap<String, Vec<String>> {
+    let mut summary = HashMap::new();
 
-    let capabilities = ["reasoning", "tool_call", "attachment", "vision"];
+    // Define all capabilities to check
+    let capabilities = vec!["reasoning", "tool_call", "attachment", "vision"];
 
     for capability in capabilities {
         let models = find_models_with_capability(registry, capability).await;
-        if !models.is_empty() {
-            summary.insert(capability.to_string(), models);
-        }
+        let model_ids: Vec<String> = models.into_iter().map(|model| model.id).collect();
+        summary.insert(capability.to_string(), model_ids);
     }
 
     summary
@@ -575,11 +606,11 @@ mod tests {
 
         let reasoning_models = find_models_with_capability(&registry, "reasoning").await;
         assert_eq!(reasoning_models.len(), 1);
-        assert!(reasoning_models.contains(&"reasoning-model".to_string()));
+        assert_eq!(reasoning_models[0].id, "reasoning-model");
 
         let vision_models = find_models_with_capability(&registry, "vision").await;
         assert_eq!(vision_models.len(), 1);
-        assert!(vision_models.contains(&"vision-model".to_string()));
+        assert_eq!(vision_models[0].id, "vision-model");
 
         // Test unknown capability
         let unknown_models = find_models_with_capability(&registry, "unknown").await;
@@ -732,7 +763,7 @@ mod tests {
     async fn test_check_provider_configuration() {
         let registry = ProviderRegistry::default();
 
-        // Add test provider with required env var
+        // Add test provider with required env var and models
         {
             let mut providers = registry.providers.write().await;
             providers.insert(
@@ -747,7 +778,37 @@ mod tests {
                     doc_url: "https://api.test.com/docs".to_string(),
                     api_version: None,
                     available: true,
-                    model_ids: vec![],
+                    model_ids: vec!["test-model".to_string()],
+                },
+            );
+        }
+
+        // Add a model for the test provider
+        {
+            let mut models = registry.models.write().await;
+            models.insert(
+                "test-model".to_string(),
+                ModelInfo {
+                    id: "test-model".to_string(),
+                    name: "Test Model".to_string(),
+                    description: "A test model".to_string(),
+                    provider_id: "test-provider".to_string(),
+                    cost: ModelCostInfo {
+                        input: 0.01,
+                        output: 0.02,
+                        cache_read: None,
+                        cache_write: None,
+                        reasoning: None,
+                        currency: "USD".to_string(),
+                    },
+                    limits: ModelLimitInfo {
+                        context: 4096,
+                        output: 2048,
+                        metadata: HashMap::new(),
+                    },
+                    input_modalities: vec!["text".to_string()],
+                    output_modalities: vec!["text".to_string()],
+                    metadata: HashMap::new(),
                 },
             );
         }
@@ -825,9 +886,11 @@ mod tests {
         }
 
         let summary = get_capability_summary(&registry).await;
-        assert_eq!(summary.len(), 2);
+        assert_eq!(summary.len(), 4); // All capabilities are checked, even if empty
         assert!(summary.contains_key("reasoning"));
         assert!(summary.contains_key("vision"));
+        assert!(summary.contains_key("tool_call"));
+        assert!(summary.contains_key("attachment"));
 
         let reasoning_models = &summary["reasoning"];
         assert_eq!(reasoning_models.len(), 1);
@@ -836,5 +899,12 @@ mod tests {
         let vision_models = &summary["vision"];
         assert_eq!(vision_models.len(), 1);
         assert!(vision_models.contains(&"vision-model".to_string()));
+
+        // Check empty capabilities
+        let tool_call_models = &summary["tool_call"];
+        assert_eq!(tool_call_models.len(), 0);
+
+        let attachment_models = &summary["attachment"];
+        assert_eq!(attachment_models.len(), 0);
     }
 }
