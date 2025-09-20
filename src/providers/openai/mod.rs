@@ -3,6 +3,11 @@
 
 pub mod conversions;
 pub mod settings;
+
+#[cfg(feature = "models-dev")]
+use crate::models_dev::traits::ModelsDevAware;
+#[cfg(feature = "models-dev")]
+use crate::models_dev::types::{Model, Provider as ModelsDevProvider};
 use async_openai::types::responses::{
     Content, CreateResponse, OutputContent, Response, ResponseEvent, ResponseStream,
 };
@@ -27,7 +32,7 @@ use serde::Serialize;
 pub struct OpenAI {
     #[serde(skip)]
     client: Client<OpenAIConfig>,
-    settings: OpenAIProviderSettings,
+    pub settings: OpenAIProviderSettings,
 }
 
 impl OpenAI {
@@ -46,6 +51,42 @@ impl OpenAI {
 }
 
 impl Provider for OpenAI {}
+
+#[cfg(feature = "models-dev")]
+impl ModelsDevAware for OpenAI {
+    fn supported_npm_packages() -> Vec<String> {
+        vec!["@ai-sdk/openai".to_string()]
+    }
+
+    fn from_models_dev_info(provider: &ModelsDevProvider, model: Option<&Model>) -> Option<Self> {
+        // Check if this provider supports the NPM package
+        if !Self::supported_npm_packages().contains(&provider.npm.name) {
+            return None;
+        }
+
+        // Get the API key from environment
+        let api_key = std::env::var("OPENAI_API_KEY").ok()?;
+
+        // Use the provided model or the first available model
+        let model_id = model.map_or_else(
+            || provider.models.first().map(|m| m.id.clone()),
+            |m| Some(m.id.clone()),
+        )?;
+
+        // Create OpenAI provider settings
+        let settings = OpenAIProviderSettings {
+            api_key,
+            provider_name: provider.name.clone(),
+            model_name: model_id,
+        };
+
+        // Create the OpenAI client
+        let client =
+            Client::with_config(OpenAIConfig::new().with_api_key(settings.api_key.to_string()));
+
+        Some(OpenAI { settings, client })
+    }
+}
 
 #[async_trait]
 impl LanguageModel for OpenAI {

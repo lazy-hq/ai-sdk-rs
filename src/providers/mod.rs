@@ -3,3 +3,6 @@
 
 #[cfg(feature = "openai")]
 pub mod openai;
+
+#[cfg(feature = "models-dev")]
+pub use crate::models_dev::traits::ModelsDevAware;

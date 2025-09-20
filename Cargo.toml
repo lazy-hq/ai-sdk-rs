@@ -31,6 +31,10 @@ required-features = ["models-dev"]
 name = "models_dev_integration_tests"
 required-features = ["models-dev"]
 
+[[test]]
+name = "openai_models_dev_aware_tests"
+required-features = ["openai", "models-dev"]
+
 [dependencies]
 tera = "1"
 once_cell = "1.19.0"

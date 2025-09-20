@@ -351,7 +351,11 @@ mod tests {
         let config_check = check_provider_configuration(&registry, "openai").await;
         assert!(config_check.is_err());
         let missing_vars = config_check.unwrap_err();
-        assert!(missing_vars.contains(&"OPENAI_API_KEY".to_string()));
+        assert!(
+            missing_vars
+                .iter()
+                .any(|msg| msg.contains("OPENAI_API_KEY"))
+        );
     }
 
     #[tokio::test]

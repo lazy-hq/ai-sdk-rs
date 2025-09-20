@@ -50,14 +50,17 @@
 //!     // Create a registry with default client
 //!     let registry = ProviderRegistry::with_default_client();
 //!     
-//!     // Refresh data from the API
-//!     registry.refresh().await?;
+//!     // Refresh data from the API (commented out for doctest)
+//!     // registry.refresh().await?;
 //!     
 //!     // Find the best model for a specific use case
+//!     // Note: This will return None if registry hasn't been refreshed
 //!     let chat_model = find_best_model_for_use_case(&registry, "chat").await;
 //!     
 //!     if let Some(model_id) = chat_model {
 //!         println!("Best chat model: {}", model_id);
+//!     } else {
+//!         println!("No chat model found - try refreshing the registry first");
 //!     }
 //!     
 //!     Ok(())
@@ -84,8 +87,8 @@
 //!     // Create registry with custom client
 //!     let registry = ProviderRegistry::new(client);
 //!     
-//!     // Use the registry
-//!     registry.refresh().await?;
+//!     // Use the registry (commented out for doctest to avoid network calls)
+//!     // registry.refresh().await?;
 //!     
 //!     // Access provider and model information
 //!     let providers = registry.get_all_providers().await;
@@ -109,6 +112,7 @@
 //! ```rust
 //! use aisdk::models_dev::ModelsDevClient;
 //!
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let client = ModelsDevClient::new();
 //!
 //! // Check cache statistics
@@ -119,6 +123,8 @@
 //!
 //! // Clear caches if needed
 //! client.clear_caches().await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Provider Discovery
@@ -131,6 +137,7 @@
 //!     list_providers_for_npm_package, get_providers_summary
 //! };
 //!
+//! # async fn example() {
 //! let registry = ProviderRegistry::default();
 //!
 //! // Find providers by cloud service name
@@ -144,6 +151,7 @@
 //! for (provider_id, provider_name, model_ids) in summary {
 //!     println!("{} ({}): {} models", provider_name, provider_id, model_ids.len());
 //! }
+//! # }
 //! ```
 //!
 //! ## Model Discovery
@@ -153,8 +161,11 @@
 //! ```rust
 //! use aisdk::models_dev::{
 //!     find_models_with_capability, find_best_model_for_use_case,
-//!     get_capability_summary
+//!     get_capability_summary, ProviderRegistry
 //! };
+//!
+//! # async fn example() {
+//! let registry = ProviderRegistry::default();
 //!
 //! // Find models with specific capabilities
 //! let reasoning_models = find_models_with_capability(&registry, "reasoning").await;
@@ -170,6 +181,7 @@
 //! for (capability, model_ids) in capabilities {
 //!     println!("{}: {} models", capability, model_ids.len());
 //! }
+//! # }
 //! ```
 //!
 //! ## Provider Integration
@@ -178,22 +190,30 @@
 //!
 //! ```rust
 //! use aisdk::models_dev::{
-//!     ProviderRegistry, traits::{OpenAIProvider, ModelsDevAware}
+//!     ProviderRegistry, traits::{ModelsDevAware}
 //! };
+//! # #[cfg(feature = "openai")]
+//! # use aisdk::providers::openai::OpenAI;
 //!
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let registry = ProviderRegistry::default();
 //! registry.refresh().await?;
 //!
 //! // Create provider instances using registry data
-//! match registry.create_provider::<OpenAIProvider>("openai").await {
+//! # #[cfg(feature = "openai")]
+//! match registry.create_provider::<OpenAI>("openai").await {
 //!     Ok(provider) => {
-//!         println!("Created OpenAI provider: {}", provider.base_url);
+//!         println!("Created OpenAI provider: {}", provider.settings.provider_name);
 //!         // Use the provider for AI operations
 //!     }
 //!     Err(e) => {
 //!         println!("Failed to create provider: {}", e);
 //!     }
 //! }
+//! # #[cfg(not(feature = "openai"))]
+//! # println!("OpenAI provider not available - enable with 'openai' feature");
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Configuration
@@ -220,25 +240,28 @@
 //! ```rust
 //! use aisdk::models_dev::{ModelsDevError, ModelsDevClient};
 //!
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let client = ModelsDevClient::new();
 //!
 //! match client.fetch_providers().await {
 //!     Ok(providers) => {
 //!         println!("Fetched {} providers", providers.len());
 //!     }
-//!     Err(ModelsDevError::NetworkError(e)) => {
-//!         eprintln!("Network error: {}", e);
+//!     Err(ModelsDevError::HttpError(e)) => {
+//!         eprintln!("HTTP error: {}", e);
 //!     }
 //!     Err(ModelsDevError::ApiError(msg)) => {
 //!         eprintln!("API error: {}", msg);
 //!     }
-//!     Err(ModelsDevError::CacheError(e)) => {
-//!         eprintln!("Cache error: {}", e);
+//!     Err(ModelsDevError::CacheNotFound(path)) => {
+//!         eprintln!("Cache not found: {:?}", path);
 //!     }
 //!     Err(e) => {
 //!         eprintln!("Other error: {}", e);
 //!     }
 //! }
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Performance Considerations

@@ -132,9 +132,9 @@ pub async fn list_providers_for_npm_package(
 ///
 /// # Examples
 /// ```rust
-/// use topaz::models_dev::{ProviderRegistry, find_models_with_capability};
+/// use aisdk::models_dev::{ProviderRegistry, find_models_with_capability};
 ///
-/// # async fn example() -> Vec<topaz::models_dev::ModelInfo> {
+/// # async fn example() -> Vec<aisdk::models_dev::ModelInfo> {
 /// let registry = ProviderRegistry::default();
 /// // registry.refresh().await.unwrap(); // Load data
 /// let reasoning_models = find_models_with_capability(&registry, "reasoning").await;
@@ -311,13 +311,13 @@ pub async fn find_best_model_for_use_case(
 ///
 /// # Examples
 /// ```rust
-/// use topaz::models_dev::{ProviderRegistry, check_provider_configuration};
+/// use aisdk::models_dev::{ProviderRegistry, check_provider_configuration};
 ///
 /// # async fn example() -> Result<(), Vec<String>> {
 /// let registry = ProviderRegistry::default();
 /// // registry.refresh().await.unwrap(); // Load data
 /// let result = check_provider_configuration(&registry, "openai").await;
-/// match result {
+/// match &result {
 ///     Ok(()) => println!("Configuration is valid"),
 ///     Err(errors) => println!("Configuration errors: {:?}", errors),
 /// }
@@ -394,13 +394,13 @@ pub async fn check_provider_configuration(
 ///
 /// # Examples
 /// ```rust
-/// use topaz::models_dev::{ProviderRegistry, get_capability_summary};
+/// use aisdk::models_dev::{ProviderRegistry, get_capability_summary};
 ///
 /// # async fn example() -> std::collections::HashMap<String, Vec<String>> {
 /// let registry = ProviderRegistry::default();
 /// // registry.refresh().await.unwrap(); // Load data
 /// let capabilities = get_capability_summary(&registry).await;
-/// for (capability, model_ids) in capabilities {
+/// for (capability, model_ids) in &capabilities {
 ///     println!("{} capability: {} models", capability, model_ids.len());
 /// }
 /// capabilities
@@ -415,7 +415,11 @@ pub async fn get_capability_summary(registry: &ProviderRegistry) -> HashMap<Stri
     for capability in capabilities {
         let models = find_models_with_capability(registry, capability).await;
         let model_ids: Vec<String> = models.into_iter().map(|model| model.id).collect();
-        summary.insert(capability.to_string(), model_ids);
+
+        // Only include capabilities that have at least one model
+        if !model_ids.is_empty() {
+            summary.insert(capability.to_string(), model_ids);
+        }
     }
 
     summary
@@ -885,11 +889,11 @@ mod tests {
         }
 
         let summary = get_capability_summary(&registry).await;
-        assert_eq!(summary.len(), 4); // All capabilities are checked, even if empty
+        assert_eq!(summary.len(), 2); // Only capabilities with models are returned
         assert!(summary.contains_key("reasoning"));
         assert!(summary.contains_key("vision"));
-        assert!(summary.contains_key("tool_call"));
-        assert!(summary.contains_key("attachment"));
+        assert!(!summary.contains_key("tool_call"));
+        assert!(!summary.contains_key("attachment"));
 
         let reasoning_models = &summary["reasoning"];
         assert_eq!(reasoning_models.len(), 1);
@@ -899,11 +903,8 @@ mod tests {
         assert_eq!(vision_models.len(), 1);
         assert!(vision_models.contains(&"vision-model".to_string()));
 
-        // Check empty capabilities
-        let tool_call_models = &summary["tool_call"];
-        assert_eq!(tool_call_models.len(), 0);
-
-        let attachment_models = &summary["attachment"];
-        assert_eq!(attachment_models.len(), 0);
+        // Verify that capabilities without models are not included
+        assert!(!summary.contains_key("tool_call"));
+        assert!(!summary.contains_key("attachment"));
     }
 }
