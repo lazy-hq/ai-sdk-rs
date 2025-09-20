@@ -23,6 +23,10 @@ required-features = ["openai"]
 name = "models_dev_data_structures_tests"
 required-features = ["models-dev"]
 
+[[test]]
+name = "models_dev_registry_tests"
+required-features = ["models-dev"]
+
 [dependencies]
 tera = "1"
 once_cell = "1.19.0"

@@ -16,10 +16,18 @@ pub mod types;
 pub mod traits;
 
 #[cfg(feature = "models-dev")]
+pub mod registry;
+
+#[cfg(feature = "models-dev")]
 pub use client::ModelsDevClient;
 
 #[cfg(feature = "models-dev")]
 pub use error::ModelsDevError;
+
+#[cfg(feature = "models-dev")]
+pub use registry::{
+    EnvVarInfo, ModelCostInfo, ModelInfo, ModelLimitInfo, ProviderInfo, ProviderRegistry,
+};
 
 #[cfg(feature = "models-dev")]
 pub use types::{
