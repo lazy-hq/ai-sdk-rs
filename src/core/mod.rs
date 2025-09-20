@@ -8,13 +8,13 @@
 //! re-exported for convenient access.
 
 pub mod language_model;
+pub mod messages;
 pub mod provider;
-pub mod types;
 pub mod utils;
 
 // Re-export key components to provide a clean public API.
 pub use language_model::{
     GenerateText, GenerateTextResponse, LanguageModel, StreamText, StreamTextResponse,
 };
+pub use messages::{AssistantMessage, Message, Role, SystemMessage, UserMessage};
 pub use provider::Provider;
-pub use types::*;

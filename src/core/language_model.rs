@@ -5,7 +5,7 @@
 //! underlying implementation details of different AI providers, offering a
 //! unified interface for various operations like text generation or streaming.
 
-use crate::core::types::Message;
+use crate::core::Message;
 use crate::core::utils::resolve_message;
 use crate::error::{Error, Result};
 use async_trait::async_trait;
