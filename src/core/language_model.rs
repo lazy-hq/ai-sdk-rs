@@ -243,7 +243,7 @@ impl<M: LanguageModel> LanguageModelRequestBuilder<M> {
 
 /// ModelStage Builder
 impl<M: LanguageModel> LanguageModelRequestBuilder<M, ModelStage> {
-    pub fn model(self, model: M) -> LanguageModelRequestBuilder<M, ConversationStage> {
+    pub fn model(self, model: M) -> LanguageModelRequestBuilder<M, SystemStage> {
         LanguageModelRequestBuilder {
             model: Some(model),
             prompt: self.prompt,
@@ -264,6 +264,27 @@ impl<M: LanguageModel> LanguageModelRequestBuilder<M, SystemStage> {
             prompt: self.prompt,
             options: LanguageModelOptions {
                 system: Some(system.into()),
+                ..self.options
+            },
+            state: std::marker::PhantomData,
+        }
+    }
+
+    pub fn prompt(self, prompt: impl Into<String>) -> LanguageModelRequestBuilder<M, OptionsStage> {
+        LanguageModelRequestBuilder {
+            model: self.model,
+            prompt: Some(prompt.into()),
+            options: self.options,
+            state: std::marker::PhantomData,
+        }
+    }
+
+    pub fn messages(self, messages: Vec<Message>) -> LanguageModelRequestBuilder<M, OptionsStage> {
+        LanguageModelRequestBuilder {
+            model: self.model,
+            prompt: self.prompt,
+            options: LanguageModelOptions {
+                messages,
                 ..self.options
             },
             state: std::marker::PhantomData,
