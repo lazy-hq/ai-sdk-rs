@@ -9,14 +9,12 @@ use async_openai::types::responses::{
 use async_openai::{Client, config::OpenAIConfig};
 use futures::{StreamExt, stream::once};
 
-use crate::core::types::LanguageModelStreamResponse;
+use crate::core::language_model::{
+    LanguageModelOptions, LanguageModelResponse, LanguageModelStreamResponse, StreamChunkData,
+};
 use crate::providers::openai::settings::{OpenAIProviderSettings, OpenAIProviderSettingsBuilder};
 use crate::{
-    core::{
-        language_model::LanguageModel,
-        provider::Provider,
-        types::{LanguageModelCallOptions, LanguageModelResponse, StreamChunkData},
-    },
+    core::{language_model::LanguageModel, provider::Provider},
     error::Result,
 };
 use async_trait::async_trait;
@@ -49,10 +47,7 @@ impl Provider for OpenAI {}
 
 #[async_trait]
 impl LanguageModel for OpenAI {
-    async fn generate(
-        &mut self,
-        options: LanguageModelCallOptions,
-    ) -> Result<LanguageModelResponse> {
+    async fn generate(&mut self, options: LanguageModelOptions) -> Result<LanguageModelResponse> {
         let mut request: CreateResponse = options.into();
         request.model = self.settings.model_name.to_string();
 
@@ -78,7 +73,7 @@ impl LanguageModel for OpenAI {
 
     async fn generate_stream(
         &mut self,
-        options: LanguageModelCallOptions,
+        options: LanguageModelOptions,
     ) -> Result<LanguageModelStreamResponse> {
         let mut request: CreateResponse = options.into();
         request.model = self.settings.model_name.to_string();
