@@ -37,8 +37,8 @@ aisdk = { version = "0.1.0", features = ["openai"] }
 
 ```rust
 use aisdk::{
-    core::{GenerateTextCallOptions, generate_text},
-    providers::openai::{OpenAI, OpenAIProviderSettings},
+    core::{LanguageModelRequest},
+    providers::openai::OpenAI,
 };
 
 #[tokio::main]
@@ -47,11 +47,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // with default openai provider settings
     let openai = OpenAI::new("gpt-5");
 
-    let options = GenerateTextCallOptions::builder()
-        .prompt("Say hello.")
-        .build()?;
+    let result = LanguageModelRequest::builder()
+        .model(openai)
+        .prompt("hello world")
+        .build()
+        .generate_text()
+        .await;
 
-    let result = generate_text(openai, options).await?;
     println!("{}", result.text);
     Ok(())
 }
@@ -61,8 +63,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ```rust
 use aisdk::{
-    core::{GenerateTextCallOptions, generate_stream},
-    providers::openai::{OpenAI, OpenAIProviderSettings},
+    core::{LanguageModelRequest},
+    providers::openai::OpenAI,
 };
 use futures::StreamExt;
 
@@ -75,11 +77,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .model_name("gpt-4o")
         .build()?;
 
-    let options = GenerateTextCallOptions::builder()
+    let mut stream = LanguageModelRequest::builder()
+        .model(openai)
         .prompt("Count from 1 to 10.")
-        .build()?;
+        .build()
+        .stream_text()
+        .await?;
 
-    let mut stream = generate_stream(openai, options).await?;
     while let Some(chunk) = stream.stream.next().await {
         print!("{}", chunk.text);
     }
