@@ -6,8 +6,8 @@
 
 use crate::{
     core::{
-        language_model::LanguageModel,
-        types::{GenerateTextCallOptions, GenerateTextResponse, LanguageModelCallOptions},
+        language_model::{GenerateOptions, LanguageModel, LanguageModelOptions},
+        types::GenerateTextResponse,
         utils::resolve_message,
     },
     error::Result,
@@ -28,23 +28,23 @@ use crate::{
 /// # Errors
 ///
 /// Returns an `Error` if the underlying model fails to generate a response.
-pub async fn generate_text(
-    mut model: impl LanguageModel,
-    options: GenerateTextCallOptions,
+pub async fn generate_text<M: LanguageModel>(
+    mut options: GenerateOptions<M>,
 ) -> Result<GenerateTextResponse> {
     let (system_prompt, messages) =
-        resolve_message(options.system, options.prompt, options.messages);
+        resolve_message(&options.system, &options.prompt, &options.messages);
 
-    let response = model
+    let response = options
+        .model
         .generate(
-            LanguageModelCallOptions::builder()
+            LanguageModelOptions::builder()
                 .system(system_prompt)
                 .messages(messages)
-                .max_tokens(options.max_tokens)
+                .max_output_tokens(options.max_output_tokens)
                 .temperature(options.temperature)
                 .top_p(options.top_p)
                 .top_k(options.top_k)
-                .stop(options.stop)
+                .stop(options.stop.clone())
                 .build()?,
         )
         .await?;

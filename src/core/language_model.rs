@@ -8,7 +8,7 @@
 use std::ops::{Deref, DerefMut};
 
 use crate::core::types::Message;
-use crate::core::{LanguageModelCallOptions, LanguageModelResponse, LanguageModelStreamResponse};
+use crate::core::{LanguageModelResponse, LanguageModelStreamResponse};
 use crate::error::{Error, Result};
 use async_trait::async_trait;
 use derive_builder::Builder;
@@ -34,10 +34,7 @@ pub trait LanguageModel: Send + Sync + std::fmt::Debug {
     /// # Errors
     ///
     /// Returns an `Error` if the API call fails or the request is invalid.
-    async fn generate(
-        &mut self,
-        options: LanguageModelCallOptions,
-    ) -> Result<LanguageModelResponse>;
+    async fn generate(&mut self, options: LanguageModelOptions) -> Result<LanguageModelResponse>;
 
     /// Performs a streaming text generation request.
     ///
@@ -48,7 +45,7 @@ pub trait LanguageModel: Send + Sync + std::fmt::Debug {
     /// Returns an `Error` if the API call fails or the request is invalid.
     async fn generate_stream(
         &mut self,
-        options: LanguageModelCallOptions,
+        options: LanguageModelOptions,
     ) -> Result<LanguageModelStreamResponse>;
 }
 
@@ -57,7 +54,6 @@ pub trait LanguageModel: Send + Sync + std::fmt::Debug {
 // ============================================================================
 
 /// Options for a language model request.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, Default, Builder)]
 #[builder(pattern = "owned", setter(into), build_fn(error = "Error"))]
 pub struct LanguageModelOptions {
@@ -111,10 +107,16 @@ pub struct LanguageModelOptions {
     //pub provider_options: <HashMap<String, <HashMap<String, JsonValue>>>>,
 }
 
+impl LanguageModelOptions {
+    pub fn builder() -> LanguageModelOptionsBuilder {
+        LanguageModelOptionsBuilder::default()
+    }
+}
+
 /// Options for text generation requests such as `generate_text` and `stream_text`.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct GenerateOptions<M: LanguageModel> {
+pub struct GenerateOptions<M: LanguageModel> {
     /// The Language Model to use.
     pub model: M,
 
@@ -130,6 +132,20 @@ struct GenerateOptions<M: LanguageModel> {
 impl<M: LanguageModel> GenerateOptions<M> {
     fn builder() -> GenerateOptionsBuilder<M> {
         GenerateOptionsBuilder::default()
+    }
+}
+
+impl<M: LanguageModel> Deref for GenerateOptions<M> {
+    type Target = LanguageModelOptions;
+
+    fn deref(&self) -> &Self::Target {
+        &self.options
+    }
+}
+
+impl<M: LanguageModel> DerefMut for GenerateOptions<M> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.options
     }
 }
 
@@ -152,6 +168,7 @@ pub struct ConversationStage {}
 /// returns builder.build
 pub struct OptionsStage {}
 
+#[allow(dead_code)]
 struct GenerateOptionsBuilder<M: LanguageModel, State = ModelStage> {
     model: Option<M>,
     prompt: Option<String>,
@@ -185,8 +202,8 @@ impl<M: LanguageModel> GenerateOptionsBuilder<M> {
     }
 }
 
-#[allow(dead_code)]
 /// ModelStage Builder
+#[allow(dead_code)]
 impl<M: LanguageModel> GenerateOptionsBuilder<M, ModelStage> {
     pub fn model(self, model: M) -> GenerateOptionsBuilder<M, ConversationStage> {
         GenerateOptionsBuilder {
@@ -198,8 +215,8 @@ impl<M: LanguageModel> GenerateOptionsBuilder<M, ModelStage> {
     }
 }
 
-#[allow(dead_code)]
 /// SystemStage Builder
+#[allow(dead_code)]
 impl<M: LanguageModel> GenerateOptionsBuilder<M, SystemStage> {
     fn system(self, system: impl Into<String>) -> GenerateOptionsBuilder<M, ConversationStage> {
         GenerateOptionsBuilder {
@@ -214,8 +231,8 @@ impl<M: LanguageModel> GenerateOptionsBuilder<M, SystemStage> {
     }
 }
 
-#[allow(dead_code)]
 /// ConversationStage Builder
+#[allow(dead_code)]
 impl<M: LanguageModel> GenerateOptionsBuilder<M, ConversationStage> {
     fn prompt(self, prompt: impl Into<String>) -> GenerateOptionsBuilder<M, OptionsStage> {
         GenerateOptionsBuilder {
@@ -239,8 +256,8 @@ impl<M: LanguageModel> GenerateOptionsBuilder<M, ConversationStage> {
     }
 }
 
-#[allow(dead_code)]
 /// OptionsStage Builder
+#[allow(dead_code)]
 impl<M: LanguageModel> GenerateOptionsBuilder<M, OptionsStage> {
     fn seed(mut self, seed: impl Into<u32>) -> Self {
         self.seed = Some(seed.into());
