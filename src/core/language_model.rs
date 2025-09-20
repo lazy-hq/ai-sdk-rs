@@ -8,6 +8,7 @@
 use std::ops::{Deref, DerefMut};
 
 use crate::core::types::Message;
+use crate::core::utils::resolve_message;
 use crate::core::{LanguageModelResponse, LanguageModelStreamResponse};
 use crate::error::{Error, Result};
 use async_trait::async_trait;
@@ -77,9 +78,6 @@ pub struct LanguageModelOptions {
     /// Top-k sampling.
     pub top_k: Option<u32>,
 
-    /// Stop sequence.
-    pub stop: Option<Vec<String>>,
-
     /// Maximum number of retries.
     pub max_retries: Option<u32>,
 
@@ -88,7 +86,6 @@ pub struct LanguageModelOptions {
 
     /// Stop sequences.
     /// If set, the model will stop generating text when one of the stop sequences is generated.
-    /// Providers may have limits on the number of stop sequences.
     pub stop_sequences: Option<Vec<String>>,
 
     /// Presence penalty setting. It affects the likelihood of the model to
@@ -169,7 +166,7 @@ pub struct ConversationStage {}
 pub struct OptionsStage {}
 
 #[allow(dead_code)]
-struct GenerateOptionsBuilder<M: LanguageModel, State = ModelStage> {
+pub struct GenerateOptionsBuilder<M: LanguageModel, State = ModelStage> {
     model: Option<M>,
     prompt: Option<String>,
     options: LanguageModelOptions,
@@ -279,8 +276,8 @@ impl<M: LanguageModel> GenerateOptionsBuilder<M, OptionsStage> {
         self
     }
 
-    fn stop(mut self, stop: impl Into<Vec<String>>) -> Self {
-        self.stop = Some(stop.into());
+    fn stop_sequences(mut self, stop_sequences: impl Into<Vec<String>>) -> Self {
+        self.stop_sequences = Some(stop_sequences.into());
         self
     }
 
@@ -307,6 +304,78 @@ impl<M: LanguageModel> GenerateOptionsBuilder<M, OptionsStage> {
     }
 }
 
+/// Core struct for generating text using a language model.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenerateText<M: LanguageModel> {
+    pub options: GenerateOptions<M>,
+}
+
+impl<M: LanguageModel> GenerateText<M> {
+    pub fn builder() -> GenerateOptionsBuilder<M> {
+        GenerateOptionsBuilder::default()
+    }
+}
+
+//TODO: add standard response fields
+/// Response from a generate call on `GenerateText`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenerateTextResponse {
+    /// The generated text.
+    pub text: String,
+}
+
+impl GenerateTextResponse {
+    /// Creates a new response with the generated text.
+    pub fn new(text: impl Into<String>) -> Self {
+        Self { text: text.into() }
+    }
+}
+
 // ============================================================================
 // Section: implementations
 // ============================================================================
+
+impl<M: LanguageModel> GenerateText<M> {
+    /// Generates text using a specified language model.
+    ///
+    /// Generate a text and call tools for a given prompt using a language model.
+    /// This function does not stream the output. If you want to stream the output, use `StreamText` instead.
+    ///
+    /// # Arguments
+    ///
+    /// * `model` - A language model that implements the `LanguageModel` trait.
+    ///
+    /// * `options` - A `GenerateTextCallOptions` struct containing the model, prompt,
+    ///   and other parameters for the request.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Error` if the underlying model fails to generate a response.
+    pub async fn generate(&mut self) -> Result<GenerateTextResponse> {
+        let (system_prompt, messages) = resolve_message(
+            &self.options.system,
+            &self.options.prompt,
+            &self.options.messages,
+        );
+
+        let response = self
+            .options
+            .model
+            .generate(
+                LanguageModelOptions::builder()
+                    .system(system_prompt)
+                    .messages(messages)
+                    .max_output_tokens(self.options.max_output_tokens)
+                    .temperature(self.options.temperature)
+                    .top_p(self.options.top_p)
+                    .top_k(self.options.top_k)
+                    .stop_sequences(self.options.stop_sequences.clone())
+                    .build()?,
+            )
+            .await?;
+
+        let result = GenerateTextResponse::new(response.text);
+
+        Ok(result)
+    }
+}

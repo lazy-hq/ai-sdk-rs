@@ -8,7 +8,6 @@
 //! re-exported for convenient access.
 
 pub mod generate_stream;
-pub mod generate_text;
 pub mod language_model;
 pub mod provider;
 pub mod types;
@@ -16,7 +15,6 @@ pub mod utils;
 
 // Re-export key components to provide a clean public API.
 pub use generate_stream::generate_stream;
-pub use generate_text::generate_text;
-pub use language_model::LanguageModel;
+pub use language_model::{GenerateText, GenerateTextResponse, LanguageModel};
 pub use provider::Provider;
 pub use types::*;

@@ -41,7 +41,7 @@ pub async fn generate_stream<M: LanguageModel>(
                 .temperature(options.temperature)
                 .top_p(options.top_p)
                 .top_k(options.top_k)
-                .stop(options.stop.to_owned())
+                .stop_sequences(options.stop_sequences.to_owned())
                 .build()?,
         )
         .await?;
