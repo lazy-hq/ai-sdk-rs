@@ -14,6 +14,7 @@ pub enum Message {
     System(SystemMessage),
     User(UserMessage),
     Assistant(AssistantMessage),
+    Tool(ToolOutputInfo),
 }
 
 impl Message {
@@ -113,25 +114,16 @@ impl From<&str> for UserMessage {
         Self::new(value)
     }
 }
-/// Assistant model message.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AssistantMessage {
-    role: Role,
-    pub content: String,
-}
 
-impl AssistantMessage {
-    pub fn new(content: impl Into<String>) -> Self {
-        Self {
-            role: Role::Assistant,
-            content: content.into(),
-        }
-    }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AssistantMessage {
+    Content(String),
+    ToolCall(ToolCallInfo),
 }
 
 impl From<String> for AssistantMessage {
     fn from(value: String) -> Self {
-        Self::new(value)
+        Self::Content(value)
     }
 }
 
@@ -210,4 +202,27 @@ impl MessageBuilder<Conversation> {
             state: std::marker::PhantomData,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Describes a tool
+pub struct ToolDetails {
+    // the name of the tool, usually a function name.
+    pub name: String,
+    // uniquely identifies a tool, provided by the LLM.
+    pub id: String,
+}
+
+/// Contains information necessary to call a tool
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCallInfo {
+    pub tool: ToolDetails,
+    pub input: serde_json::Value,
+}
+
+/// Contains information from a tool
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolOutputInfo {
+    pub tool: ToolDetails,
+    pub output: serde_json::Value,
 }

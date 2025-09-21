@@ -7,17 +7,15 @@
 //! Key types like `GenerateTextCallOptions` and `GenerateTextResponse` are also
 //! re-exported for convenient access.
 
-pub mod generate_stream;
-pub mod generate_text;
 pub mod language_model;
+pub mod messages;
 pub mod provider;
 pub mod tools;
-pub mod types;
 pub mod utils;
 
 // Re-export key components to provide a clean public API.
-pub use generate_stream::generate_stream;
-pub use generate_text::generate_text;
-pub use language_model::LanguageModel;
+pub use language_model::{
+    GenerateTextResponse, LanguageModel, LanguageModelRequest, StreamTextResponse,
+};
+pub use messages::{AssistantMessage, Message, Role, SystemMessage, UserMessage};
 pub use provider::Provider;
-pub use types::*;

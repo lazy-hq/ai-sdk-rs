@@ -41,7 +41,6 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
         (name, description)
     } else {
-        //println!("Failed to parse args");
         (None, None)
     };
 
@@ -90,7 +89,7 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 let ident_str = ident.to_string();
                 Some(quote! {
                     let #ident: #ty = serde_json::from_value(
-                        inp.remove(#ident_str)
+                        inp.as_object_mut().unwrap().remove(#ident_str) // TODO: unnecessary unwrap
                             .unwrap_or_else(|| todo!("Missing required parameter: {}", #ident_str))
                     ).unwrap_or_else(|e| {
                         todo!("Failed to deserialize {}: {}", #ident_str, e)
@@ -131,12 +130,13 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
             use std::collections::HashMap;
 
             #[derive(JsonSchema, Serialize, Debug)]
-            struct ToolInput {
+            //#[schemars(deny_unknown_fields)]
+            struct Function {
                 // Please add struct fields here
                 #(#struct_fields),*
             }
 
-            let input_schema = schema_for!(ToolInput);
+            let input_schema = schema_for!(Function);
             // End
 
             let mut tool = Tool::new();
@@ -144,7 +144,7 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
             tool.name = #name.to_string();
             tool.description = #description.to_string();
             tool.input_schema = input_schema;
-            tool.execute = ToolExecute::new(Box::new(|mut inp: HashMap<String, serde_json::Value>| -> std::result::Result<String, String> {
+            tool.execute = ToolExecute::new(Box::new(|mut inp| -> std::result::Result<String, String> {
                 // TODO: Do `input_schema` validation on inp
                 // Extract all parameters from the HashMap here
                 #(#binding_tokens)*

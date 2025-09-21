@@ -51,3 +51,16 @@ impl From<UninitializedFieldError> for Error {
         Error::MissingField(err.field_name().to_string())
     }
 }
+
+impl Error {
+    pub fn err_string(&self) -> String {
+        match self {
+            Error::MissingField(field) => format!("Missing field: {field}"),
+            Error::ApiError(error) => format!("API error: {error}"),
+            Error::InvalidInput(error) => format!("Invalid input: {error}"),
+            Error::Other(error) => format!("Other error: {error}"),
+            #[cfg(feature = "openai")]
+            Error::OpenAIError(error) => format!("OpenAI error: {error}"),
+        }
+    }
+}

@@ -9,14 +9,12 @@ use async_openai::types::responses::{
 use async_openai::{Client, config::OpenAIConfig};
 use futures::{StreamExt, stream::once};
 
-use crate::core::types::LanguageModelStreamResponse;
+use crate::core::language_model::{
+    LanguageModelOptions, LanguageModelResponse, LanguageModelStreamResponse, StreamChunkData,
+};
 use crate::providers::openai::settings::{OpenAIProviderSettings, OpenAIProviderSettingsBuilder};
 use crate::{
-    core::{
-        language_model::LanguageModel,
-        provider::Provider,
-        types::{LanguageModelCallOptions, LanguageModelResponse, StreamChunkData},
-    },
+    core::{language_model::LanguageModel, provider::Provider},
     error::Result,
 };
 use async_trait::async_trait;
@@ -49,29 +47,63 @@ impl Provider for OpenAI {}
 
 #[async_trait]
 impl LanguageModel for OpenAI {
-    fn provider_name(&self) -> &str {
-        &self.settings.provider_name
-    }
+    async fn generate(&mut self, options: LanguageModelOptions) -> Result<LanguageModelResponse> {
+        let mut request: CreateResponse = options.clone().into();
 
-    async fn generate(
-        &mut self,
-        options: LanguageModelCallOptions,
-    ) -> Result<LanguageModelResponse> {
-        let mut request: CreateResponse = options.into();
         request.model = self.settings.model_name.to_string();
 
         let response: Response = self.client.responses().create(request).await?;
-        let text = response
-            .output
-            .iter()
-            .find_map(|out| match out {
+        let text = String::default();
+        println!("response output: {:?}", &response.output);
+        for out in response.output {
+            match out {
                 OutputContent::Message(msg) => msg.content.iter().find_map(|c| match c {
                     Content::OutputText(t) => Some(t.text.to_string()),
                     _ => None,
                 }),
+                OutputContent::FunctionCall(_f) => {
+                    // get tool
+                    //let mut tool = None;
+                    //if let Some(tools) = &options.tools {
+                    //    for t in tools {
+                    //        if t.name == f.name {
+                    //            tool = Some(t);
+                    //        }
+                    //    }
+                    //};
+
+                    // get tool results
+                    //let mut tool_result = Some(String::default()) = None;
+                    //if let Some(tool) = tool {
+                    //    match tool.execute.call(serde_json::json!(&f.arguments)) {
+                    //        Ok(tool_result_) => { tool_result = Some(tool_result_); },
+                    //        Err(tool_result_err) => {
+                    //            tool_result =
+                    //                Some(serde_json::json!({ "error": tool_result_err.err_string() })
+                    //                    .to_string());
+                    //        }
+                    //    };
+                    //};
+
+                    // update messages
+                    let new_options = options.clone(); // TODO: can be avoided if generate
+                    // function accepts mutable options
+                    //if let Some(messages) = new_options.messages {
+                    //todo!();
+                    //let mut tool_msg = MessageContent::new(tool_result);
+                    //if let MessageType::Tool(tool_info) = &mut tool_msg.message_type {
+                    //    tool_info.call_id = f.call_id;
+                    //};
+                    //
+                    //messages.push(Message::Assistant(tool_msg.clone()));
+                    //messages.push(Message::Tool(tool_msg));
+                    //};
+
+                    Some(self.generate(new_options).await?.text)
+                }
                 _ => None,
-            })
-            .unwrap_or_default();
+            };
+        }
 
         Ok(LanguageModelResponse {
             model: Some(response.model.to_string()),
@@ -82,7 +114,7 @@ impl LanguageModel for OpenAI {
 
     async fn generate_stream(
         &mut self,
-        options: LanguageModelCallOptions,
+        options: LanguageModelOptions,
     ) -> Result<LanguageModelStreamResponse> {
         let mut request: CreateResponse = options.into();
         request.model = self.settings.model_name.to_string();

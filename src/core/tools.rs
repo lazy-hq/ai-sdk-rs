@@ -3,12 +3,10 @@ use derive_builder::Builder;
 use schemars::Schema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 
-pub type ToolFn =
-    Box<dyn FnMut(HashMap<String, Value>) -> std::result::Result<String, String> + Send + Sync>;
+pub type ToolFn = Box<dyn FnMut(Value) -> std::result::Result<String, String> + Send + Sync>;
 
 #[derive(Clone)]
 pub struct ToolExecute {
@@ -16,7 +14,7 @@ pub struct ToolExecute {
 }
 
 impl ToolExecute {
-    pub fn call(&self, map: HashMap<String, Value>) -> Result<String> {
+    pub fn call(&self, map: Value) -> Result<String> {
         let mut guard = self.inner.lock().unwrap();
         (guard)(map).map_err(|e| {
             Error::Other(e) // TODO: use tool specific errors
@@ -107,6 +105,7 @@ impl ToolList {
 mod tests {
     use super::*;
     use aisdk_macros::tool;
+    use std::collections::HashMap;
 
     #[tool]
     /// This is The Description of an example tool.
@@ -147,10 +146,14 @@ mod tests {
         );
         assert_eq!(
             tool.execute
-                .call(HashMap::from([
-                    ("a".to_string(), 1.into()),
-                    ("b".to_string(), Option::<u32>::None.into())
-                ]))
+                .call(Value::Object(
+                    HashMap::from([
+                        ("a".to_string(), 1.into()),
+                        ("b".to_string(), Option::<u32>::None.into())
+                    ])
+                    .into_iter()
+                    .collect()
+                ))
                 .unwrap(),
             "10".to_string()
         );
