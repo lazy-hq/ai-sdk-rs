@@ -193,7 +193,51 @@ async fn test_generate_text_with_output_schema() {
         .await
         .unwrap();
 
-    let result: User = result.into_schema().unwrap();
+    let user: User = result.into_schema().unwrap();
 
-    assert_eq!(result.name, "John Doe");
+    assert_eq!(user.name, "John Doe");
+}
+
+#[tokio::test]
+async fn test_stream_text_with_output_schema() {
+    dotenv().ok();
+
+    // This test requires a valid OpenAI API key to be set in the environment.
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        println!("Skipping test: OPENAI_API_KEY not set");
+        return;
+    }
+
+    #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+    #[allow(dead_code)]
+    struct User {
+        name: String,
+        age: u32,
+        email: String,
+        phone: String,
+    }
+
+    let response = LanguageModelRequest::builder()
+        .model(OpenAI::new("gpt-4o"))
+        .prompt("generate user with dummy data, and and name of 'John Doe'")
+        .schema::<User>()
+        .build()
+        .stream_text()
+        .await
+        .unwrap();
+
+    let mut stream = response.stream;
+
+    let mut buf = String::new();
+    while let Some(chunk) = stream.next().await {
+        if let Ok(lang_resp) = chunk
+            && !lang_resp.text.is_empty()
+        {
+            buf.push_str(&lang_resp.text);
+        }
+    }
+
+    let user: User = serde_json::from_str(&buf).unwrap();
+
+    assert_eq!(user.name, "John Doe");
 }
