@@ -10,15 +10,12 @@ use async_openai::{Client, config::OpenAIConfig};
 use futures::{StreamExt, stream::once};
 
 use crate::core::language_model::{
-    LanguageModelOptions, LanguageModelResponse, LanguageModelStreamResponse, StreamChunkData,
+    LanguageModelOptions, LanguageModelResponse, LanguageModelResponseContentType,
+    LanguageModelStreamResponse, StreamChunkData,
 };
 use crate::providers::openai::settings::{OpenAIProviderSettings, OpenAIProviderSettingsBuilder};
 use crate::{
-    core::{
-        language_model::LanguageModel,
-        messages::{AssistantMessage, Message, ToolCallInfo, ToolOutputInfo},
-        provider::Provider,
-    },
+    core::{language_model::LanguageModel, messages::ToolCallInfo, provider::Provider},
     error::Result,
 };
 use async_trait::async_trait;
@@ -57,68 +54,32 @@ impl LanguageModel for OpenAI {
         request.model = self.settings.model_name.to_string();
 
         let response: Response = self.client.responses().create(request).await?;
-        let text = String::default();
-        println!("response output: {:?}", &response.output);
+        let mut collected: Vec<LanguageModelResponseContentType> = Vec::new();
+
         for out in response.output {
             match out {
-                OutputContent::Message(msg) => msg.content.iter().find_map(|c| match c {
-                    Content::OutputText(t) => Some(t.text.to_string()),
-                    _ => None,
-                }),
-                OutputContent::FunctionCall(ref f) => {
-                    //get tool
-                    let mut tool = None;
-                    if let Some(tools) = &options.tools {
-                        for t in tools {
-                            if t.name == f.name {
-                                tool = Some(t);
-                            }
+                OutputContent::Message(msg) => {
+                    for c in msg.content {
+                        if let Content::OutputText(t) = c {
+                            collected.push(LanguageModelResponseContentType::new(t.text));
                         }
-                    };
-
-                    //get tool results
-                    let mut tool_result = None;
-                    if let Some(tool) = tool {
-                        match tool.execute.call(serde_json::json!(f.arguments)) {
-                            Ok(tr) => {
-                                tool_result = Some(tr);
-                            }
-                            Err(tool_result_err) => {
-                                let schema =
-                                    serde_json::json!({ "error": tool_result_err.err_string() });
-                                tool_result = Some(schema.to_string());
-                            }
-                        };
-                    };
-
-                    // update messages
-                    // TODO: can be avoided if generate
-                    //function accepts mutable options
-                    let mut new_options = options.clone();
-                    if let Some(tool) = tool {
-                        let mut tool_info: ToolCallInfo = tool.clone().into();
-                        tool_info.tool.id = f.id.to_owned();
-
-                        let mut tool_output_info: ToolOutputInfo = tool.clone().into();
-                        tool_output_info.output =
-                            serde_json::Value::String(tool_result.unwrap_or("".to_string()));
-                        tool_output_info.tool.id = f.id.to_owned();
-
-                        new_options
-                            .messages
-                            .push(Message::Assistant(AssistantMessage::ToolCall(tool_info)));
-                        new_options.messages.push(Message::Tool(tool_output_info));
-                    };
-
-                    Some(self.generate(new_options).await?.text)
+                    }
                 }
-                _ => None,
-            };
+                OutputContent::FunctionCall(f) => {
+                    let mut tool_info = ToolCallInfo::new(f.name);
+                    tool_info.id(f.call_id);
+                    tool_info.input(serde_json::from_str(&f.arguments).unwrap());
+                    collected.push(LanguageModelResponseContentType::ToolCall(tool_info));
+                }
+                other => {
+                    todo!("Unhandled output: {other:?}");
+                }
+            }
         }
 
         Ok(LanguageModelResponse {
             model: Some(response.model.to_string()),
-            text,
+            content: collected.first().unwrap().clone(),
             stop_reason: None,
         })
     }

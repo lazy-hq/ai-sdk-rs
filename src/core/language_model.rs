@@ -5,9 +5,9 @@
 //! underlying implementation details of different AI providers, offering a
 //! unified interface for various operations like text generation or streaming.
 
-use crate::core::Message;
 use crate::core::tools::Tool;
 use crate::core::utils::resolve_message;
+use crate::core::{AssistantMessage, Message, ToolCallInfo, ToolOutputInfo};
 use crate::error::{Error, Result};
 use async_trait::async_trait;
 use derive_builder::Builder;
@@ -117,12 +117,24 @@ impl LanguageModelOptions {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum LanguageModelResponseContentType {
+    Text(String),
+    ToolCall(ToolCallInfo),
+}
+
+impl LanguageModelResponseContentType {
+    pub fn new(text: impl Into<String>) -> Self {
+        Self::Text(text.into())
+    }
+}
+
 // TODO: constract a standard response type
 /// Response from a language model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LanguageModelResponse {
     /// The generated text.
-    pub text: String,
+    pub content: LanguageModelResponseContentType,
 
     /// The model that generated the response.
     pub model: Option<String>,
@@ -139,7 +151,7 @@ impl LanguageModelResponse {
     /// Creates a new response with the generated text.
     pub fn new(text: impl Into<String>) -> Self {
         Self {
-            text: text.into(),
+            content: LanguageModelResponseContentType::new(text.into()),
             model: None,
             stop_reason: None,
         }
@@ -423,7 +435,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
         let (system_prompt, messages) =
             resolve_message(&self.options.system, &self.prompt, &self.options.messages);
 
-        let options = LanguageModelOptions {
+        let mut options = LanguageModelOptions {
             system: Some(system_prompt),
             messages,
             stop_sequences: self.options.stop_sequences.to_owned(),
@@ -431,11 +443,59 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
             ..self.options
         };
 
-        let response = self.model.generate(options).await?;
+        let response = self.model.generate(options.clone()).await?;
 
-        let result = GenerateTextResponse {
-            text: response.text,
+        let text = match response.content {
+            LanguageModelResponseContentType::Text(text) => text,
+            LanguageModelResponseContentType::ToolCall(tool_info) => {
+                //get tool
+                let mut tool = None;
+                if let Some(tools) = &options.tools {
+                    for t in tools {
+                        if t.name == tool_info.tool.name {
+                            tool = Some(t);
+                        }
+                    }
+                };
+
+                //get tool results
+                let mut tool_result = None;
+                if let Some(tool) = tool {
+                    match tool.execute.call(tool_info.input.clone()) {
+                        Ok(tr) => {
+                            tool_result = Some(tr);
+                        }
+                        Err(tool_result_err) => {
+                            let schema =
+                                serde_json::json!({ "error": tool_result_err.err_string() });
+                            tool_result = Some(schema.to_string());
+                        }
+                    };
+                };
+
+                // update messages
+                // TODO: can be avoided if generate
+                //function accepts mutable options
+                if let Some(tool) = tool {
+                    let mut tool_output_info = ToolOutputInfo::new(&tool.name);
+                    tool_output_info.output(serde_json::Value::String(
+                        tool_result.unwrap_or("".to_string()),
+                    ));
+                    tool_output_info.id(&tool_info.tool.id);
+
+                    let _ = &options
+                        .messages
+                        .push(Message::Assistant(AssistantMessage::ToolCall(tool_info)));
+                    let _ = &options.messages.push(Message::Tool(tool_output_info));
+
+                    self.messages = options.messages.clone();
+                };
+
+                Box::pin(self.generate_text()).await?.text
+            }
         };
+
+        let result = GenerateTextResponse { text };
 
         Ok(result)
     }

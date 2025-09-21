@@ -17,5 +17,7 @@ pub mod utils;
 pub use language_model::{
     GenerateTextResponse, LanguageModel, LanguageModelRequest, StreamTextResponse,
 };
-pub use messages::{AssistantMessage, Message, Role, SystemMessage, UserMessage};
+pub use messages::{
+    AssistantMessage, Message, Role, SystemMessage, ToolCallInfo, ToolOutputInfo, UserMessage,
+};
 pub use provider::Provider;

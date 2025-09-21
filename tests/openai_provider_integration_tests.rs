@@ -280,7 +280,6 @@ async fn test_tool_call_for_generate_text() {
         .generate_text()
         .await;
 
-    println!("result: {result:#?}");
     assert!(result.is_ok());
 
     //let text = result.as_ref().expect("Failed to get result").text.trim();

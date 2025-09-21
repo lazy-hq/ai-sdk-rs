@@ -1,4 +1,3 @@
-use crate::core::tools::Tool;
 use serde::{Deserialize, Serialize};
 
 /// Role for model messages.
@@ -221,16 +220,27 @@ pub struct ToolCallInfo {
     pub input: serde_json::Value,
 }
 
-impl From<Tool> for ToolCallInfo {
-    // converts `Tool` to `ToolCallInfo``
-    fn from(value: Tool) -> Self {
+impl ToolCallInfo {
+    pub fn new(name: impl Into<String>) -> Self {
         Self {
             tool: ToolDetails {
-                name: value.name,
-                id: Default::default(),
+                name: name.into(),
+                ..Default::default()
             },
-            input: value.input_schema.to_value(),
+            ..Default::default()
         }
+    }
+
+    pub fn name(&mut self, name: impl Into<String>) {
+        self.tool.name = name.into();
+    }
+
+    pub fn id(&mut self, id: impl Into<String>) {
+        self.tool.id = id.into();
+    }
+
+    pub fn input(&mut self, inp: serde_json::Value) {
+        self.input = inp;
     }
 }
 
@@ -241,14 +251,26 @@ pub struct ToolOutputInfo {
     pub output: serde_json::Value,
 }
 
-impl From<Tool> for ToolOutputInfo {
-    fn from(value: Tool) -> Self {
+impl ToolOutputInfo {
+    pub fn new(name: impl Into<String>) -> Self {
         Self {
             tool: ToolDetails {
-                name: value.name,
-                id: Default::default(),
+                name: name.into(),
+                ..Default::default()
             },
-            output: Default::default(),
+            ..Default::default()
         }
+    }
+
+    pub fn name(&mut self, name: impl Into<String>) {
+        self.tool.name = name.into();
+    }
+
+    pub fn id(&mut self, id: impl Into<String>) {
+        self.tool.id = id.into();
+    }
+
+    pub fn output(&mut self, inp: serde_json::Value) {
+        self.output = inp;
     }
 }

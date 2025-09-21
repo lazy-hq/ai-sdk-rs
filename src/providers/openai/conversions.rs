@@ -84,6 +84,7 @@ impl From<Message> for InputItem {
             }
             Message::Assistant(ref assistant_msg) => match assistant_msg {
                 AssistantMessage::Text(msg) => {
+                    text_inp.role = Role::Assistant;
                     text_inp.content = InputContent::TextInput(msg.to_owned());
                     InputItem::Message(text_inp)
                 }
@@ -102,7 +103,7 @@ impl From<Message> for InputItem {
                 InputItem::Message(text_inp)
             }
             Message::System(s) => {
-                text_inp.role = Role::User;
+                text_inp.role = Role::System;
                 text_inp.content = InputContent::TextInput(s.content);
                 InputItem::Message(text_inp)
             }
