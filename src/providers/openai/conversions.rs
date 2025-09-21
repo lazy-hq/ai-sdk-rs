@@ -4,13 +4,13 @@ use async_openai::types::responses::{
     CreateResponse, Input, InputContent, InputItem, InputMessage, InputMessageType, Role,
 };
 
-use crate::core::types::{LanguageModelCallOptions, Message};
+use crate::core::language_model::LanguageModelOptions;
+use crate::core::messages::Message;
 
-impl From<LanguageModelCallOptions> for CreateResponse {
-    fn from(options: LanguageModelCallOptions) -> Self {
+impl From<LanguageModelOptions> for CreateResponse {
+    fn from(options: LanguageModelOptions) -> Self {
         let mut items: Vec<InputItem> = options
             .messages
-            .unwrap_or_default()
             .into_iter()
             .map(|m| InputItem::Message(m.into()))
             .collect();
@@ -30,7 +30,7 @@ impl From<LanguageModelCallOptions> for CreateResponse {
         CreateResponse {
             input: Input::Items(items),
             temperature: options.temperature.map(|t| t as f32 / 100.0),
-            max_output_tokens: options.max_tokens,
+            max_output_tokens: options.max_output_tokens,
             stream: Some(false),
             top_p: options.top_p.map(|t| t as f32 / 100.0),
             ..Default::default() // TODO: add support for other options
