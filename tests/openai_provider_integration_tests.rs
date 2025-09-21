@@ -260,31 +260,31 @@ async fn test_generate_text_with_messages_and_system_prompt() {
 
 #[tokio::test]
 async fn test_tool_call_for_generate_text() {
-    //dotenv().ok();
-    //
-    //// This test requires a valid OpenAI API key to be set in the environment.
-    //if std::env::var("OPENAI_API_KEY").is_err() {
-    //    println!("Skipping test: OPENAI_API_KEY not set");
-    //    return;
-    //}
-    //
-    //let options = GenerateTextCallOptions::builder()
-    //    .prompt(Some(
-    //        "Respond with exactly username of the user in all lowercase.\n
-    //            Do not include any punctuation, prefixes, or suffixes. if you\n
-    //            can't find the user return 'unknown'"
-    //            .to_string(),
-    //    ))
-    //    .with_tool(get_user_name())
-    //    .build()
-    //    .expect("Failed to build GenerateTextCallOptions");
-    //
-    //let result = generate_text(OpenAI::new("gpt-4o"), options).await;
-    //println!("result: {:#?}", result);
-    //assert!(result.is_ok());
-    //
-    ////let text = result.as_ref().expect("Failed to get result").text.trim();
-    ////assert!(text.contains("hello"));
+    // This test requires a valid OpenAI API key to be set in the environment.
+    dotenv().ok();
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        println!("Skipping test: OPENAI_API_KEY not set");
+        return;
+    }
+
+    let result = LanguageModelRequest::builder()
+        .model(OpenAI::new("gpt-4o"))
+        .prompt(
+            "Respond with exactly username of the user in all lowercase.\n
+                Do not include any punctuation, prefixes, or suffixes. if you\n
+                can't find the user return 'unknown'"
+                .to_string(),
+        )
+        .with_tool(get_user_name())
+        .build()
+        .generate_text()
+        .await;
+
+    println!("result: {result:#?}");
+    assert!(result.is_ok());
+
+    //let text = result.as_ref().expect("Failed to get result").text.trim();
+    //assert!(text.contains("hello"));
 }
 
 #[tokio::test]

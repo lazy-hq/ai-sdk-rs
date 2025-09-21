@@ -14,7 +14,11 @@ use crate::core::language_model::{
 };
 use crate::providers::openai::settings::{OpenAIProviderSettings, OpenAIProviderSettingsBuilder};
 use crate::{
-    core::{language_model::LanguageModel, provider::Provider},
+    core::{
+        language_model::LanguageModel,
+        messages::{AssistantMessage, Message, ToolCallInfo, ToolOutputInfo},
+        provider::Provider,
+    },
     error::Result,
 };
 use async_trait::async_trait;
@@ -61,43 +65,50 @@ impl LanguageModel for OpenAI {
                     Content::OutputText(t) => Some(t.text.to_string()),
                     _ => None,
                 }),
-                OutputContent::FunctionCall(_f) => {
-                    // get tool
-                    //let mut tool = None;
-                    //if let Some(tools) = &options.tools {
-                    //    for t in tools {
-                    //        if t.name == f.name {
-                    //            tool = Some(t);
-                    //        }
-                    //    }
-                    //};
+                OutputContent::FunctionCall(ref f) => {
+                    //get tool
+                    let mut tool = None;
+                    if let Some(tools) = &options.tools {
+                        for t in tools {
+                            if t.name == f.name {
+                                tool = Some(t);
+                            }
+                        }
+                    };
 
-                    // get tool results
-                    //let mut tool_result = Some(String::default()) = None;
-                    //if let Some(tool) = tool {
-                    //    match tool.execute.call(serde_json::json!(&f.arguments)) {
-                    //        Ok(tool_result_) => { tool_result = Some(tool_result_); },
-                    //        Err(tool_result_err) => {
-                    //            tool_result =
-                    //                Some(serde_json::json!({ "error": tool_result_err.err_string() })
-                    //                    .to_string());
-                    //        }
-                    //    };
-                    //};
+                    //get tool results
+                    let mut tool_result = None;
+                    if let Some(tool) = tool {
+                        match tool.execute.call(serde_json::json!(f.arguments)) {
+                            Ok(tr) => {
+                                tool_result = Some(tr);
+                            }
+                            Err(tool_result_err) => {
+                                let schema =
+                                    serde_json::json!({ "error": tool_result_err.err_string() });
+                                tool_result = Some(schema.to_string());
+                            }
+                        };
+                    };
 
                     // update messages
-                    let new_options = options.clone(); // TODO: can be avoided if generate
-                    // function accepts mutable options
-                    //if let Some(messages) = new_options.messages {
-                    //todo!();
-                    //let mut tool_msg = MessageContent::new(tool_result);
-                    //if let MessageType::Tool(tool_info) = &mut tool_msg.message_type {
-                    //    tool_info.call_id = f.call_id;
-                    //};
-                    //
-                    //messages.push(Message::Assistant(tool_msg.clone()));
-                    //messages.push(Message::Tool(tool_msg));
-                    //};
+                    // TODO: can be avoided if generate
+                    //function accepts mutable options
+                    let mut new_options = options.clone();
+                    if let Some(tool) = tool {
+                        let mut tool_info: ToolCallInfo = tool.clone().into();
+                        tool_info.tool.id = f.id.to_owned();
+
+                        let mut tool_output_info: ToolOutputInfo = tool.clone().into();
+                        tool_output_info.output =
+                            serde_json::Value::String(tool_result.unwrap_or("".to_string()));
+                        tool_output_info.tool.id = f.id.to_owned();
+
+                        new_options
+                            .messages
+                            .push(Message::Assistant(AssistantMessage::ToolCall(tool_info)));
+                        new_options.messages.push(Message::Tool(tool_output_info));
+                    };
 
                     Some(self.generate(new_options).await?.text)
                 }

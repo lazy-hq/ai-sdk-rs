@@ -1,3 +1,4 @@
+use crate::core::tools::Tool;
 use serde::{Deserialize, Serialize};
 
 /// Role for model messages.
@@ -204,7 +205,7 @@ impl MessageBuilder<Conversation> {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 /// Describes a tool
 pub struct ToolDetails {
     // the name of the tool, usually a function name.
@@ -214,15 +215,40 @@ pub struct ToolDetails {
 }
 
 /// Contains information necessary to call a tool
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCallInfo {
     pub tool: ToolDetails,
     pub input: serde_json::Value,
 }
 
+impl From<Tool> for ToolCallInfo {
+    // converts `Tool` to `ToolCallInfo``
+    fn from(value: Tool) -> Self {
+        Self {
+            tool: ToolDetails {
+                name: value.name,
+                id: Default::default(),
+            },
+            input: value.input_schema.to_value(),
+        }
+    }
+}
+
 /// Contains information from a tool
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct ToolOutputInfo {
     pub tool: ToolDetails,
     pub output: serde_json::Value,
+}
+
+impl From<Tool> for ToolOutputInfo {
+    fn from(value: Tool) -> Self {
+        Self {
+            tool: ToolDetails {
+                name: value.name,
+                id: Default::default(),
+            },
+            output: Default::default(),
+        }
+    }
 }

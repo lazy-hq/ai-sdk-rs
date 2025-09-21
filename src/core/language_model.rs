@@ -368,7 +368,7 @@ impl<M: LanguageModel> LanguageModelRequestBuilder<M, OptionsStage> {
         if let Some(tools) = self.tools.as_mut() {
             tools.push(tool)
         } else {
-            vec![tool];
+            self.tools = Some(vec![tool]);
         };
         self
     }

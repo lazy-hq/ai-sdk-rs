@@ -89,40 +89,23 @@ impl From<Message> for InputItem {
                 }
                 AssistantMessage::ToolCall(tool_info) => {
                     let mut custom_msg = Value::Object(serde_json::Map::new());
-                    custom_msg["arguments"] = tool_info.input.clone();
+                    custom_msg["arguments"] = Value::String(tool_info.input.to_string().clone());
                     custom_msg["call_id"] = Value::String(tool_info.tool.id.clone());
                     custom_msg["name"] = Value::String(tool_info.tool.name.clone());
                     custom_msg["type"] = Value::String("function_call".to_string());
                     InputItem::Custom(custom_msg)
                 }
             },
-            _ => unimplemented!(),
-        };
-
-        if let Message::Tool(tool_info) = m {
-            // manually adding the types because async_openai didn't implement it.
-            let mut custom_msg = Value::Object(serde_json::Map::new());
-            custom_msg["type"] = Value::String("function_call_output".to_string());
-            custom_msg["call_id"] = Value::String(tool_info.tool.id);
-            custom_msg["output"] = tool_info.output;
-            InputItem::Custom(custom_msg)
-        } else {
-            let (role, text) = match m {
-                Message::System(s) => (Role::System, s.content),
-                Message::User(u) => (Role::User, u.content),
-                Message::Assistant(_a) => todo!(),
-                _ => unreachable!(
-                    "Tool is handling separately in an if let clause. this is the else."
-                ),
-            };
-
-            let input_msg = InputMessage {
-                role,
-                kind: InputMessageType::default(),
-                content: InputContent::TextInput(text),
-            };
-
-            InputItem::Message(input_msg)
+            Message::User(u) => {
+                text_inp.role = Role::User;
+                text_inp.content = InputContent::TextInput(u.content);
+                InputItem::Message(text_inp)
+            }
+            Message::System(s) => {
+                text_inp.role = Role::User;
+                text_inp.content = InputContent::TextInput(s.content);
+                InputItem::Message(text_inp)
+            }
         }
     }
 }
