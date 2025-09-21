@@ -117,13 +117,13 @@ impl From<&str> for UserMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AssistantMessage {
-    Content(String),
+    Text(String),
     ToolCall(ToolCallInfo),
 }
 
 impl From<String> for AssistantMessage {
     fn from(value: String) -> Self {
-        Self::Content(value)
+        Self::Text(value)
     }
 }
 

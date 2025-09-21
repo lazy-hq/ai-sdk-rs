@@ -1,6 +1,7 @@
 //! Helper functions and conversions for the OpenAI provider.
 
 use crate::core::language_model::LanguageModelOptions;
+use crate::core::messages::AssistantMessage;
 use crate::core::messages::Message;
 use crate::core::tools::Tool;
 use async_openai::types::responses::{
@@ -67,7 +68,7 @@ impl From<LanguageModelOptions> for CreateResponse {
 
 impl From<Message> for InputItem {
     fn from(m: Message) -> Self {
-        let mut _common_input_msg = InputMessage {
+        let mut text_inp = InputMessage {
             role: Role::System,
             kind: InputMessageType::default(),
             content: InputContent::TextInput(Default::default()),
@@ -81,13 +82,23 @@ impl From<Message> for InputItem {
                 custom_msg["output"] = tool_info.output.clone();
                 InputItem::Custom(custom_msg)
             }
-            Message::Assistant(_assistant_msg) => {
-                todo!()
-            }
+            Message::Assistant(ref assistant_msg) => match assistant_msg {
+                AssistantMessage::Text(msg) => {
+                    text_inp.content = InputContent::TextInput(msg.to_owned());
+                    InputItem::Message(text_inp)
+                }
+                AssistantMessage::ToolCall(tool_info) => {
+                    let mut custom_msg = Value::Object(serde_json::Map::new());
+                    custom_msg["arguments"] = tool_info.input.clone();
+                    custom_msg["call_id"] = Value::String(tool_info.tool.id.clone());
+                    custom_msg["name"] = Value::String(tool_info.tool.name.clone());
+                    custom_msg["type"] = Value::String("function_call".to_string());
+                    InputItem::Custom(custom_msg)
+                }
+            },
             _ => unimplemented!(),
         };
-        //panic!();
-        //
+
         if let Message::Tool(tool_info) = m {
             // manually adding the types because async_openai didn't implement it.
             let mut custom_msg = Value::Object(serde_json::Map::new());
