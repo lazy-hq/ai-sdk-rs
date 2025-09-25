@@ -1,9 +1,9 @@
 # AISDK
 
-[![Build Status](https://github.com/lazy-hq/ai-sdk-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/lazy-hq/ai-sdk-rs/actions/workflows/ci.yml)
+[![Build Status](https://github.com/lazy-hq/aisdk/actions/workflows/ci.yml/badge.svg)](https://github.com/lazy-hq/aisdk/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Issues](https://img.shields.io/github/issues/lazy-hq/ai-sdk-rs)](https://github.com/lazy-hq/ai-sdk-rs/issues)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/lazy-hq/ai-sdk-rs/pulls)
+[![Issues](https://img.shields.io/github/issues/lazy-hq/aisdk)](https://github.com/lazy-hq/aisdk/issues)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/lazy-hq/aisdk/pulls)
 
 An open-source Rust library for building AI-powered applications, inspired by the Vercel AI SDK. It provides a type-safe interface for interacting with Large Language Models (LLMs).
 
