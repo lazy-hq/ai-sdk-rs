@@ -35,3 +35,13 @@ cargo-husky = { version = "1", features = ["precommit-hook", "run-cargo-test", "
 dotenv = "0.15.0"
 tokio = { version = "1.46.1", features = ["full"]}
 tempfile = "3.10.1"
+
+[package.metadata.release]
+pre-release-commit-message = "chore: release {{version}}"
+pre-release-replacements = [
+  {file="CHANGELOG.md", search="Unreleased", replace="{{version}}"},
+  {file="CHANGELOG.md", search="\\.\\.\\.HEAD", replace="...{{tag_name}}", exactly=1},
+  {file="CHANGELOG.md", search="ReleaseDate", replace="{{date}}"},
+  {file="CHANGELOG.md", search="<!-- next-header -->", replace="<!-- next-header -->\n\n## [Unreleased] - ReleaseDate", exactly=1},
+  {file="CHANGELOG.md", search="<!-- next-url -->", replace="<!-- next-url -->\n[Unreleased]: https://github.com/lazy-hq/aisdk/compare/{{tag_name}}...HEAD", exactly=1},
+]
