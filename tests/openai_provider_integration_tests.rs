@@ -287,6 +287,29 @@ async fn test_tool_call_for_generate_text() {
 }
 
 #[tokio::test]
+async fn test_tool_call_for_generate_text_with_multiple_steps() {
+    // This test requires a valid OpenAI API key to be set in the environment.
+    //dotenv().ok();
+    //if std::env::var("OPENAI_API_KEY").is_err() {
+    //    println!("Skipping test: OPENAI_API_KEY not set");
+    //    return;
+    //}
+    //
+    //let result = LanguageModelRequest::builder()
+    //    .model(OpenAI::new("gpt-4o"))
+    //    .prompt()
+    //    .with_tool(get_user_name())
+    //    .build()
+    //    .generate_text()
+    //    .await;
+    //
+    //assert!(result.is_ok());
+
+    //let text = result.as_ref().expect("Failed to get result").text.trim();
+    //assert!(text.contains("hello"));
+}
+
+#[tokio::test]
 async fn test_tool_call_for_generate_stream() {
     //todo!();
     //dotenv().ok();

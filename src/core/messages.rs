@@ -15,6 +15,7 @@ pub enum Message {
     User(UserMessage),
     Assistant(AssistantMessage),
     Tool(ToolOutputInfo),
+    Developer(String),
 }
 
 impl Message {
