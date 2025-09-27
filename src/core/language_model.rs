@@ -19,6 +19,11 @@ use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 
 // ============================================================================
+// Section: constants
+// ============================================================================
+const DEFAULT_TOOL_STEP_COUNT: u32 = 10;
+
+// ============================================================================
 // Section: traits
 // ============================================================================
 
@@ -105,7 +110,7 @@ pub struct LanguageModelOptions {
     pub frequency_penalty: Option<f32>,
 
     /// Number tool call cycles to make
-    pub stop_count: Option<u32>,
+    pub step_count: Option<u32>,
 
     /// List of tools to use.
     pub tools: Option<Vec<Tool>>,
@@ -505,10 +510,23 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
                         .messages
                         .push(Message::Assistant(AssistantMessage::ToolCall(tool_info)));
                     let _ = &options.messages.push(Message::Tool(tool_output_info));
-
-                    self.messages = options.messages.clone();
                 };
 
+                if let Some(step_count) = &self.step_count {
+                    if *step_count == 0 {
+                        self.tools = None; // remove the tools
+                        let _ = &options.messages.push(Message::Developer(
+                            "Error: Maximum tool calls cycle reached".to_string(),
+                        ));
+                    } else {
+                        self.step_count = Some(step_count - 1);
+                    }
+                } else {
+                    let step_count = DEFAULT_TOOL_STEP_COUNT - 1;
+                    self.step_count = Some(step_count);
+                }
+
+                self.messages = options.messages.clone();
                 Box::pin(self.generate_text()).await?.text
             }
         };

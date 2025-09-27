@@ -116,6 +116,11 @@ impl From<Message> for InputItem {
                 text_inp.content = InputContent::TextInput(s.content);
                 InputItem::Message(text_inp)
             }
+            Message::Developer(d) => {
+                text_inp.role = Role::Developer;
+                text_inp.content = InputContent::TextInput(d);
+                InputItem::Message(text_inp)
+            }
         }
     }
 }
