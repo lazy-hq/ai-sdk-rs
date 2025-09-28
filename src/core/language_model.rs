@@ -21,7 +21,7 @@ use std::pin::Pin;
 // ============================================================================
 // Section: constants
 // ============================================================================
-const DEFAULT_TOOL_STEP_COUNT: u32 = 10;
+const DEFAULT_TOOL_STEP_COUNT: usize = 10;
 
 // ============================================================================
 // Section: traits
@@ -110,7 +110,10 @@ pub struct LanguageModelOptions {
     pub frequency_penalty: Option<f32>,
 
     /// Number tool call cycles to make
-    pub step_count: Option<u32>,
+    pub step_count: Option<usize>,
+
+    /// Output from each tool call
+    pub steps: Option<Vec<serde_json::Value>>,
 
     /// List of tools to use.
     pub tools: Option<Vec<Tool>>,
@@ -393,11 +396,17 @@ impl<M: LanguageModel> LanguageModelRequestBuilder<M, OptionsStage> {
     }
 
     pub fn with_tool(mut self, tool: Tool) -> Self {
-        if let Some(tools) = self.tools.as_mut() {
-            tools.push(tool)
-        } else {
-            self.tools = Some(vec![tool]);
-        };
+        self.tools.get_or_insert_default().push(tool);
+        self
+    }
+
+    pub fn with_step(mut self, output: serde_json::Value) -> Self {
+        self.steps.get_or_insert_default().push(output);
+        self
+    }
+
+    pub fn step_count(mut self, step_count: usize) -> Self {
+        self.step_count = Some(step_count);
         self
     }
 
@@ -424,6 +433,7 @@ impl<M: LanguageModel> LanguageModelRequestBuilder<M, OptionsStage> {
 pub struct GenerateTextResponse {
     /// The generated text.
     pub text: String,
+    pub steps: Option<Vec<serde_json::Value>>,
 }
 
 impl GenerateTextResponse {
@@ -463,6 +473,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
             schema: self.options.schema.to_owned(),
             stop_sequences: self.options.stop_sequences.to_owned(),
             tools: self.options.tools.to_owned(),
+            steps: self.options.steps.to_owned(),
             ..self.options
         };
 
@@ -497,8 +508,6 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
                 };
 
                 // update messages
-                // TODO: can be avoided if generate
-                //function accepts mutable options
                 if let Some(tool) = tool {
                     let mut tool_output_info = ToolOutputInfo::new(&tool.name);
                     tool_output_info.output(serde_json::Value::String(
@@ -509,11 +518,23 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
                     let _ = &options
                         .messages
                         .push(Message::Assistant(AssistantMessage::ToolCall(tool_info)));
-                    let _ = &options.messages.push(Message::Tool(tool_output_info));
+                    let _ = &options
+                        .messages
+                        .push(Message::Tool(tool_output_info.clone()));
+
+                    log::debug!(
+                        "adding step({}): {:#?}",
+                        &self.step_count.unwrap_or_default(),
+                        &tool_output_info.output
+                    );
+                    self.steps
+                        .get_or_insert_default()
+                        .push(tool_output_info.output);
                 };
 
                 if let Some(step_count) = &self.step_count {
                     if *step_count == 0 {
+                        log::debug!("Maximum tool calls cycle reached: {:#?}", &self.steps);
                         self.tools = None; // remove the tools
                         let _ = &options.messages.push(Message::Developer(
                             "Error: Maximum tool calls cycle reached".to_string(),
@@ -531,7 +552,10 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
             }
         };
 
-        let result = GenerateTextResponse { text };
+        let result = GenerateTextResponse {
+            text,
+            steps: self.steps.clone(),
+        };
 
         Ok(result)
     }
@@ -552,6 +576,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
             schema: self.options.schema.to_owned(),
             stop_sequences: self.options.stop_sequences.to_owned(),
             tools: self.options.tools.to_owned(),
+            steps: self.options.steps.to_owned(),
             ..self.options
         };
 
