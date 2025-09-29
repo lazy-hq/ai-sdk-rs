@@ -11,6 +11,8 @@ use crate::error::{Error, Result};
 use async_trait::async_trait;
 use derive_builder::Builder;
 use futures::Stream;
+use schemars::{JsonSchema, Schema, schema_for};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
@@ -35,6 +37,7 @@ pub trait LanguageModel: Send + Sync + std::fmt::Debug {
     /// # Errors
     ///
     /// Returns an `Error` if the API call fails or the request is invalid.
+    //TODO: rename to generate_text
     async fn generate(&mut self, options: LanguageModelOptions) -> Result<LanguageModelResponse>;
 
     /// Performs a streaming text generation request.
@@ -44,6 +47,7 @@ pub trait LanguageModel: Send + Sync + std::fmt::Debug {
     /// # Errors
     ///
     /// Returns an `Error` if the API call fails or the request is invalid.
+    //TODO: rename to stream_text
     async fn generate_stream(
         &mut self,
         options: LanguageModelOptions,
@@ -64,6 +68,9 @@ pub struct LanguageModelOptions {
     /// The messages to generate text from.
     /// At least User Message is required.
     pub messages: Vec<Message>,
+
+    /// Output format schema.
+    pub schema: Option<Schema>,
 
     /// The seed (integer) to use for random sampling. If set and supported
     /// by the model, calls will generate deterministic results.
@@ -318,6 +325,10 @@ impl<M: LanguageModel> LanguageModelRequestBuilder<M, ConversationStage> {
 
 /// OptionsStage Builder
 impl<M: LanguageModel> LanguageModelRequestBuilder<M, OptionsStage> {
+    pub fn schema<T: JsonSchema>(mut self) -> Self {
+        self.schema = Some(schema_for!(T));
+        self
+    }
     pub fn seed(mut self, seed: impl Into<u32>) -> Self {
         self.seed = Some(seed.into());
         self
@@ -378,6 +389,12 @@ pub struct GenerateTextResponse {
     pub text: String,
 }
 
+impl GenerateTextResponse {
+    pub fn into_schema<T: DeserializeOwned>(&self) -> std::result::Result<T, serde_json::Error> {
+        serde_json::from_str(&self.text)
+    }
+}
+
 //TODO: add standard response fields
 /// Response from a stream call on `StreamText`.
 pub struct StreamTextResponse {
@@ -406,6 +423,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
         let options = LanguageModelOptions {
             system: Some(system_prompt),
             messages,
+            schema: self.options.schema.to_owned(),
             stop_sequences: self.options.stop_sequences.to_owned(),
             ..self.options
         };
@@ -432,6 +450,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
         let options = LanguageModelOptions {
             system: Some(system_prompt),
             messages,
+            schema: self.options.schema.to_owned(),
             stop_sequences: self.options.stop_sequences.to_owned(),
             ..self.options
         };

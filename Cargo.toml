@@ -29,6 +29,7 @@ thiserror = "2.0.12"
 derive_builder = "0.20.2"
 futures = "0.3"
 async-openai = { version = "0.29.3", optional = true }
+schemars = "1.0.4"
 
 [dev-dependencies]
 cargo-husky = { version = "1", features = ["precommit-hook", "run-cargo-test", "run-cargo-clippy", "run-cargo-fmt"] }
