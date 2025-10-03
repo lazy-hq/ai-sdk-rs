@@ -16,7 +16,7 @@ use crate::core::language_model::{
 };
 use crate::providers::openai::settings::{OpenAIProviderSettings, OpenAIProviderSettingsBuilder};
 use crate::{
-    core::{language_model::LanguageModel, messages::ToolCallInfo, provider::Provider},
+    core::{language_model::LanguageModel, provider::Provider, tools::ToolCallInfo},
     error::Result,
 };
 use async_trait::async_trait;

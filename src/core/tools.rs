@@ -98,6 +98,75 @@ impl ToolList {
     pub fn add_tool(&mut self, tool: Tool) {
         self.tools.push(tool);
     }
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+/// Describes a tool
+pub struct ToolDetails {
+    // the name of the tool, usually a function name.
+    pub name: String,
+    // uniquely identifies a tool, provided by the LLM.
+    pub id: String,
+}
+
+/// Contains information necessary to call a tool
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCallInfo {
+    pub tool: ToolDetails,
+    pub input: serde_json::Value,
+}
+
+impl ToolCallInfo {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            tool: ToolDetails {
+                name: name.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    pub fn name(&mut self, name: impl Into<String>) {
+        self.tool.name = name.into();
+    }
+
+    pub fn id(&mut self, id: impl Into<String>) {
+        self.tool.id = id.into();
+    }
+
+    pub fn input(&mut self, inp: serde_json::Value) {
+        self.input = inp;
+    }
+}
+
+/// Contains information from a tool
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+pub struct ToolOutputInfo {
+    pub tool: ToolDetails,
+    pub output: serde_json::Value,
+}
+
+impl ToolOutputInfo {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            tool: ToolDetails {
+                name: name.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    pub fn name(&mut self, name: impl Into<String>) {
+        self.tool.name = name.into();
+    }
+
+    pub fn id(&mut self, id: impl Into<String>) {
+        self.tool.id = id.into();
+    }
+
+    pub fn output(&mut self, inp: serde_json::Value) {
+        self.output = inp;
+    }
 }
 
 // tests
