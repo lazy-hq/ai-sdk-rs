@@ -24,7 +24,7 @@ use std::task::{Context, Poll};
 // ============================================================================
 // Section: constants
 // ============================================================================
-const DEFAULT_TOOL_STEP_COUNT: usize = 10;
+const DEFAULT_TOOL_STEP_COUNT: usize = 3;
 
 // ============================================================================
 // Section: traits
@@ -501,6 +501,9 @@ pub struct StreamTextResponse {
 
     /// The model that generated the response.
     pub model: Option<String>,
+
+    /// Tool output from each tool call.
+    pub steps: Option<Vec<serde_json::Value>>,
 }
 
 // ============================================================================
@@ -677,11 +680,6 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
                             .messages
                             .push(Message::Tool(tool_output_info.clone()));
 
-                        log::debug!(
-                            "adding step({}): {:#?}",
-                            &self.step_count.unwrap_or_default(),
-                            &tool_output_info.output
-                        );
                         self.steps
                             .get_or_insert_default()
                             .push(tool_output_info.output);
@@ -689,7 +687,6 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
 
                     if let Some(step_count) = &self.step_count {
                         if *step_count == 0 {
-                            log::debug!("Maximum tool calls cycle reached: {:#?}", &self.steps);
                             self.tools = None; // remove the tools
                             let _ = &options.messages.push(Message::Developer(
                                 "Error: Maximum tool calls cycle reached".to_string(),
@@ -702,6 +699,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
                         self.step_count = Some(step_count);
                     }
 
+                    self.messages = options.messages.clone();
                     let next_res = Box::pin(self.stream_text()).await;
                     match next_res {
                         Ok(StreamTextResponse { mut stream, .. }) => {
@@ -728,6 +726,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
         let result = StreamTextResponse {
             stream,
             model: response.model,
+            steps: self.steps.clone(),
         };
 
         Ok(result)

@@ -1,9 +1,13 @@
 //! Integration tests for the OpenAI provider.
 
 use aisdk::{
-    core::{LanguageModelRequest, LanguageModelStreamChunkType, Message},
+    core::{
+        LanguageModelRequest, LanguageModelStreamChunkType, Message,
+        tools::{Tool, ToolExecute},
+    },
     providers::openai::OpenAI,
 };
+use aisdk_macros::tool;
 use dotenv::dotenv;
 use futures::StreamExt;
 use schemars::JsonSchema;
@@ -236,4 +240,131 @@ async fn test_stream_text_with_output_schema() {
     let user: User = serde_json::from_str(&buf).unwrap();
 
     assert_eq!(user.name, "John Doe");
+}
+
+#[tokio::test]
+async fn test_generate_text_with_tools() {
+    dotenv().ok();
+
+    // This test requires a valid OpenAI API key to be set in the environment.
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        println!("Skipping test: OPENAI_API_KEY not set");
+        return;
+    }
+
+    #[tool]
+    /// Returns the username
+    fn get_username() {
+        Ok("ishak".to_string())
+    }
+
+    let response = LanguageModelRequest::builder()
+        .model(OpenAI::new("gpt-4o"))
+        .system("Call a tool to get the username.")
+        .prompt("What is the username?")
+        .with_tool(get_username())
+        .build()
+        .generate_text()
+        .await
+        .unwrap();
+
+    assert!(response.text.contains("ishak"));
+}
+
+#[tokio::test]
+async fn test_generate_text_with_tools_and_step_counts() {
+    dotenv().ok();
+    // This test requires a valid OpenAI API key to be set in the environment.
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        println!("Skipping test: OPENAI_API_KEY not set");
+        return;
+    }
+
+    #[tool]
+    /// Returns the username
+    fn get_username() {
+        Err("username not found. please try again".to_string())
+    }
+
+    let response = LanguageModelRequest::builder()
+        .model(OpenAI::new("gpt-4o"))
+        .system("Call a tool to get the username. try again if it fails.")
+        .prompt("What is the username?")
+        .step_count(2)
+        .with_tool(get_username())
+        .build()
+        .generate_text()
+        .await
+        .unwrap();
+
+    assert!(response.steps.is_some());
+    assert_eq!(response.steps.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn test_generate_stream_with_tools() {
+    dotenv().ok();
+
+    // This test requires a valid OpenAI API key to be set in the environment.
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        println!("Skipping test: OPENAI_API_KEY not set");
+        return;
+    }
+
+    #[tool]
+    /// Returns the username
+    fn get_username() {
+        Ok("ishak".to_string())
+    }
+
+    let response = LanguageModelRequest::builder()
+        .model(OpenAI::new("gpt-4o"))
+        .system("Call a tool to get the username.")
+        .prompt("What is the username?")
+        .with_tool(get_username())
+        .build()
+        .stream_text()
+        .await
+        .unwrap();
+
+    let mut stream = response.stream;
+
+    let mut buf = String::new();
+    while let Some(chunk) = stream.next().await {
+        if let LanguageModelStreamChunkType::Text(text) = chunk {
+            buf.push_str(&text);
+        }
+    }
+
+    assert!(buf.contains("ishak"));
+}
+
+#[tokio::test]
+async fn test_generate_stream_with_tools_and_step_counts() {
+    dotenv().ok();
+    // This test requires a valid OpenAI API key to be set in the environment.
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        println!("Skipping test: OPENAI_API_KEY not set");
+        return;
+    }
+
+    #[tool]
+    /// Returns the username
+    fn get_username() {
+        Err("username not found. please try again".to_string())
+    }
+
+    let response = LanguageModelRequest::builder()
+        .model(OpenAI::new("gpt-4o"))
+        .system("Call a tool to get the username. try again if it fails.")
+        .prompt("What is the username?")
+        .step_count(2)
+        .with_tool(get_username())
+        .build()
+        .stream_text()
+        .await
+        .unwrap();
+
+    assert!(response.steps.is_some());
+    assert_eq!(response.steps.unwrap().len(), 2);
 }
