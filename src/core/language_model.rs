@@ -182,9 +182,10 @@ pub enum LanguageModelChunkState<T> {
     Final(Option<T>),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub enum LanguageModelStreamChunkType {
     /// The model has started generating text.
+    #[default]
     Start,
     /// Text chunk
     Text(String),
@@ -198,12 +199,6 @@ pub enum LanguageModelStreamChunkType {
     Incomplete(String),
     /// Return this for unimplemented features for a specific model.
     NotImplemented(String),
-}
-
-impl Default for LanguageModelStreamChunkType {
-    fn default() -> Self {
-        Self::Start
-    }
 }
 
 /// A response from a streaming language model.
