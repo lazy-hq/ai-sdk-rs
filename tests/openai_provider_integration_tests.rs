@@ -1,29 +1,13 @@
 //! Integration tests for the OpenAI provider.
 
 use aisdk::{
-    core::{
-        LanguageModelRequest, Message,
-        tools::{Tool, ToolExecute},
-    },
+    core::{LanguageModelRequest, LanguageModelStreamChunkType, Message},
     providers::openai::OpenAI,
 };
-use aisdk_macros::tool;
 use dotenv::dotenv;
 use futures::StreamExt;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-
-#[tool]
-/// Hello
-fn example_tool(a: String) -> Tool {
-    Ok("".to_string())
-}
-
-#[tool]
-// Fetch The User Name
-fn get_user_name() {
-    Ok("john_doe".to_string())
-}
 
 #[tokio::test]
 async fn test_generate_text_with_openai() {
@@ -69,10 +53,8 @@ async fn test_generate_stream_with_openai() {
 
     let mut buf = String::new();
     while let Some(chunk) = stream.next().await {
-        if let Ok(lang_resp) = chunk
-            && !lang_resp.text.is_empty()
-        {
-            buf.push_str(&lang_resp.text);
+        if let LanguageModelStreamChunkType::Text(text) = chunk {
+            buf.push_str(&text);
         }
     }
 
@@ -191,23 +173,27 @@ async fn test_generate_text_with_output_schema() {
         return;
     }
 
+    #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+    #[allow(dead_code)]
+    struct User {
+        name: String,
+        age: u32,
+        email: String,
+        phone: String,
+    }
+
     let result = LanguageModelRequest::builder()
         .model(OpenAI::new("gpt-4o"))
-        .prompt(
-            "Respond with exactly username of the user in all lowercase.\n
-                Do not include any punctuation, prefixes, or suffixes. if you\n
-                can't find the user return 'unknown'"
-                .to_string(),
-        )
-        .with_tool(get_user_name())
+        .prompt("generate user with dummy data, and and name of 'John Doe'")
+        .schema::<User>()
         .build()
         .generate_text()
-        .await;
+        .await
+        .unwrap();
 
-    assert!(result.is_ok());
+    let user: User = result.into_schema().unwrap();
 
-    //let text = result.as_ref().expect("Failed to get result").text.trim();
-    //assert!(text.contains("hello"));
+    assert_eq!(user.name, "John Doe");
 }
 
 #[tokio::test]
@@ -242,10 +228,8 @@ async fn test_stream_text_with_output_schema() {
 
     let mut buf = String::new();
     while let Some(chunk) = stream.next().await {
-        if let Ok(lang_resp) = chunk
-            && !lang_resp.text.is_empty()
-        {
-            buf.push_str(&lang_resp.text);
+        if let LanguageModelStreamChunkType::Text(text) = chunk {
+            buf.push_str(&text);
         }
     }
 

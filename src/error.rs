@@ -52,10 +52,10 @@ impl From<UninitializedFieldError> for Error {
     }
 }
 
-impl Error {
-    pub fn err_string(&self) -> String {
-        match self {
-            Error::MissingField(field) => format!("Missing field: {field}"),
+impl From<Error> for String {
+    fn from(value: Error) -> String {
+        match value {
+            Error::MissingField(error) => format!("Missing field: {error}"),
             Error::ApiError(error) => format!("API error: {error}"),
             Error::InvalidInput(error) => format!("Invalid input: {error}"),
             Error::Other(error) => format!("Other error: {error}"),

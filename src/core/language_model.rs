@@ -12,11 +12,14 @@ use crate::error::{Error, Result};
 use async_trait::async_trait;
 use derive_builder::Builder;
 use futures::Stream;
+use futures::StreamExt;
 use schemars::{JsonSchema, Schema, schema_for};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::task::{Context, Poll};
 
 // ============================================================================
 // Section: constants
@@ -173,25 +176,73 @@ impl LanguageModelResponse {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum LanguageModelChunkState<T> {
+    InProgress(T),
+    Final(Option<T>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum LanguageModelStreamChunkType {
+    /// The model has started generating text.
+    Start,
+    /// Text chunk
+    Text(String),
+    /// Tool call argument chunk
+    ToolCall(ToolCallInfo),
+    /// The model has stopped generating text.
+    End,
+    /// The model has failed to generate text.
+    Failed(String),
+    /// The model finsished generating text with incomplete response.
+    Incomplete(String),
+    /// Return this for unimplemented features for a specific model.
+    NotImplemented(String),
+}
+
+impl Default for LanguageModelStreamChunkType {
+    fn default() -> Self {
+        Self::Start
+    }
+}
+
 /// A response from a streaming language model.
 pub struct LanguageModelStreamResponse {
     /// A stream of responses from the language model.
-    pub stream: StreamChunk,
+    pub stream: LanguageModelStream,
 
     /// The model that generated the response.
     pub model: Option<String>,
 }
 
 /// Stream of responses from mapped to a common interface.
-pub type StreamChunk = Pin<Box<dyn Stream<Item = Result<StreamChunkData>> + Send>>;
+pub type LanguageModelStream =
+    Pin<Box<dyn Stream<Item = Result<LanguageModelStreamChunkType>> + Send>>;
 
-/// Chunked response from a language model.
-pub struct StreamChunkData {
-    /// The generated text.
-    pub text: String,
+/// alternavite approach for --^
+// Struct wrapper for MPMC channel to act as a stream
+pub struct MpmcStream {
+    receiver: Receiver<LanguageModelStreamChunkType>,
+}
 
-    /// The reason the model stopped generating text.
-    pub stop_reason: Option<String>,
+impl MpmcStream {
+    // Creates a new MpmcStream with an associated Sender
+    pub fn new() -> (Sender<LanguageModelStreamChunkType>, MpmcStream) {
+        let (tx, rx) = mpsc::channel();
+        (tx, MpmcStream { receiver: rx })
+    }
+}
+
+impl Stream for MpmcStream {
+    type Item = LanguageModelStreamChunkType;
+
+    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.receiver.try_recv() {
+            Ok(item) => Poll::Ready(Some(item)),
+            Err(mpsc::TryRecvError::Empty) => Poll::Pending,
+            Err(mpsc::TryRecvError::Disconnected) => Poll::Ready(None),
+        }
+    }
 }
 
 /// Options for text generation requests such as `generate_text` and `stream_text`.
@@ -446,7 +497,7 @@ impl GenerateTextResponse {
 /// Response from a stream call on `StreamText`.
 pub struct StreamTextResponse {
     /// A stream of responses from the language model.
-    pub stream: StreamChunk,
+    pub stream: MpmcStream,
 
     /// The model that generated the response.
     pub model: Option<String>,
@@ -501,7 +552,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
                         }
                         Err(tool_result_err) => {
                             let schema =
-                                serde_json::json!({ "error": tool_result_err.err_string() });
+                                serde_json::json!({ "error": String::from(tool_result_err) });
                             tool_result = Some(schema.to_string());
                         }
                     };
@@ -570,7 +621,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
         let (system_prompt, messages) =
             resolve_message(&self.options.system, &self.prompt, &self.options.messages);
 
-        let options = LanguageModelOptions {
+        let mut options = LanguageModelOptions {
             system: Some(system_prompt),
             messages,
             schema: self.options.schema.to_owned(),
@@ -580,10 +631,102 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
             ..self.options
         };
 
-        let response = self.model.generate_stream(options).await?;
+        let mut response = self.model.generate_stream(options.to_owned()).await?;
+
+        let (tx, stream) = MpmcStream::new();
+        while let Some(chunk) = response.stream.next().await {
+            match chunk {
+                Ok(LanguageModelStreamChunkType::ToolCall(tool_info)) => {
+                    //get tool
+                    let mut tool = None;
+                    if let Some(tools) = &options.tools {
+                        for t in tools {
+                            if t.name == tool_info.tool.name {
+                                tool = Some(t);
+                            }
+                        }
+                    };
+
+                    //get tool results
+                    let mut tool_result = None;
+                    if let Some(tool) = tool {
+                        match tool.execute.call(tool_info.input.clone()) {
+                            Ok(tr) => {
+                                tool_result = Some(tr);
+                            }
+                            Err(tool_result_err) => {
+                                let schema =
+                                    serde_json::json!({ "error": String::from(tool_result_err) });
+                                tool_result = Some(schema.to_string());
+                            }
+                        };
+                    };
+
+                    // update messages
+                    if let Some(tool) = tool {
+                        let mut tool_output_info = ToolOutputInfo::new(&tool.name);
+                        tool_output_info.output(serde_json::Value::String(
+                            tool_result.unwrap_or("".to_string()),
+                        ));
+                        tool_output_info.id(&tool_info.tool.id);
+
+                        let _ = &options
+                            .messages
+                            .push(Message::Assistant(AssistantMessage::ToolCall(tool_info)));
+                        let _ = &options
+                            .messages
+                            .push(Message::Tool(tool_output_info.clone()));
+
+                        log::debug!(
+                            "adding step({}): {:#?}",
+                            &self.step_count.unwrap_or_default(),
+                            &tool_output_info.output
+                        );
+                        self.steps
+                            .get_or_insert_default()
+                            .push(tool_output_info.output);
+                    };
+
+                    if let Some(step_count) = &self.step_count {
+                        if *step_count == 0 {
+                            log::debug!("Maximum tool calls cycle reached: {:#?}", &self.steps);
+                            self.tools = None; // remove the tools
+                            let _ = &options.messages.push(Message::Developer(
+                                "Error: Maximum tool calls cycle reached".to_string(),
+                            ));
+                        } else {
+                            self.step_count = Some(step_count - 1);
+                        }
+                    } else {
+                        let step_count = DEFAULT_TOOL_STEP_COUNT - 1;
+                        self.step_count = Some(step_count);
+                    }
+
+                    let next_res = Box::pin(self.stream_text()).await;
+                    match next_res {
+                        Ok(StreamTextResponse { mut stream, .. }) => {
+                            while let Some(chunk) = stream.next().await {
+                                let _ = tx.send(chunk);
+                            }
+                        }
+                        Err(e) => {
+                            let _ = tx.send(LanguageModelStreamChunkType::Failed(e.to_string()));
+                        }
+                    };
+                }
+                Ok(other) => {
+                    let _ = tx.send(other); // propagate
+                }
+                Err(e) => {
+                    let _ = tx.send(LanguageModelStreamChunkType::Failed(e.to_string()));
+                }
+            }
+        }
+
+        drop(tx);
 
         let result = StreamTextResponse {
-            stream: Box::pin(response.stream),
+            stream,
             model: response.model,
         };
 
