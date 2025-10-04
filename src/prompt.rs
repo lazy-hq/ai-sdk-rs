@@ -182,7 +182,6 @@ impl Promptable for Prompt {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
     use std::fs;
     use std::path::PathBuf;
     use tempfile::tempdir;
@@ -225,11 +224,8 @@ mod tests {
 
     #[test]
     fn test_file_path() {
-        // Unset PROMPT_DIR to test default
-        unsafe {
-            env::remove_var("PROMPT_DIR");
-        }
-        let prompt = Prompt::new("system/test").with_extension("md");
+        let env = PromptEnvironment::from_directory("examples/prompts");
+        let prompt = Prompt::new_with_env("system/test", env).with_extension("md");
         let path = prompt.file_path();
         assert!(path.ends_with("prompts/system/test.md"));
     }
@@ -238,15 +234,10 @@ mod tests {
     fn test_file_path_with_custom_prompt_dir() {
         let tmp_dir = tempdir().unwrap();
         let custom_dir = tmp_dir.path().to_str().unwrap();
-        unsafe {
-            env::set_var("PROMPT_DIR", custom_dir);
-        }
-        let prompt = Prompt::new("user/test");
+        let env = PromptEnvironment::from_directory(custom_dir);
+        let prompt = Prompt::new_with_env("user/test", env);
         let path = prompt.file_path();
         assert_eq!(path, PathBuf::from(custom_dir).join("user/test.prompt"));
-        unsafe {
-            env::remove_var("PROMPT_DIR");
-        }
     }
 
     #[test]
@@ -267,7 +258,8 @@ mod tests {
 
     #[test]
     fn test_base_prompt_default() {
-        let prompt = Prompt::new("system/base");
+        let env = PromptEnvironment::from_directory("examples/prompts");
+        let prompt = Prompt::new_with_env("system/base", env);
         let result = prompt.generate();
 
         assert_eq!(
