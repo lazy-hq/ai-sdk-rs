@@ -91,16 +91,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-
-
 ### Providers
 
-- **Yes**: ✅
-- **NA**: Not Applicable
+#### Supported Options
 
-| Model/Input     | Max Tokens      | Temprature      | Top P           | Top K           | Stop            |
-| --------------- | --------------- | --------------- | --------------- | --------------- | --------------- |
-| OpenAi          | ✅              | ✅              | ✅              | NA              | ✅              |
+| Model/Input | Max Tokens  | Temprature  | Top P   | Top K   | Stop    | Seed    | 
+| ----------- | ----------- | ----------- | ------- | ------- | ------- | ------- |
+| OpenAi      | ✅          | ✅          | ✅      | NA      | ✅      | NA[^1]  |
+
+[^1]: Seed is deprecated on the newer response api so it is not supported in open ai.
+
+### Tools
+
+You can define a tool using the use `aisdk::core::tool`;
+```rust
+#[tool]
+/// Returns the username
+fn get_username(id: String) {
+    // Your code here
+}
+```
+A tool has a name, a description, an input and a body. all three can be infered from standard rust function. The name is the function name, `get_username` in the above example. The description is infered from the doc comments of the fucntion, `/// Returns the username` is going to be used to describe the tool. make sure to use a verbose, language model friendly description in the comments. The input is built from the function arguments and converted to a json schema using [schemars](https://docs.rs/schemars/latest/schemars/index.html) so make sure any type you add to the function arguments derive [JsonSchema](https://docs.rs/schemars/latest/schemars/trait.JsonSchema.html). Any think you implement in the function body will be executed on the language model's request and is thread safe.
+
+The first two components can be overridden by using the macro arguments `#[tool(name, description)]` attribute.
+
+```rust
+    #[tool(
+        name = "the-name-for-this-tool",
+        desc = "the-description-for-this-tool"
+    )]
+    fn get_username(id: String) {
+        // Your code here
+    }
+
+```
 
 
 ### Prompts

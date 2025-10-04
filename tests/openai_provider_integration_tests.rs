@@ -2,12 +2,11 @@
 
 use aisdk::{
     core::{
-        LanguageModelRequest, LanguageModelStreamChunkType, Message,
+        LanguageModelRequest, LanguageModelStreamChunkType, Message, tool,
         tools::{Tool, ToolExecute},
     },
     providers::openai::OpenAI,
 };
-use aisdk_macros::tool;
 use dotenv::dotenv;
 use futures::StreamExt;
 use schemars::JsonSchema;

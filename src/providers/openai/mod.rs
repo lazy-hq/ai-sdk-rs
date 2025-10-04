@@ -157,7 +157,6 @@ impl LanguageModel for OpenAI {
 
                         Some(Ok(LanguageModelStreamChunkType::ToolCall(tool_info)))
                     }
-                    // TODO: handle other events
                     Ok(resp) => Some(Ok(LanguageModelStreamChunkType::NotImplemented(format!(
                         "{resp:?}"
                     )))),

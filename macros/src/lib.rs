@@ -14,9 +14,7 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let block = &input_fn.block;
     let inputs = &input_fn.sig.inputs;
     let attrs = &input_fn.attrs;
-    let args_parser = Punctuated::<MetaNameValue, Token![,]>::parse_terminated; // TODO: better
-                                                                                // parsing with better error
-                                                                                // messages might be good here
+    let args_parser = Punctuated::<MetaNameValue, Token![,]>::parse_terminated;
     let args = args_parser.parse(_attr);
 
     let (name_arg, description_arg) = if let Ok(args) = args {
@@ -78,7 +76,7 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let name = if let Some(name) = name_arg {
         name
     } else {
-        fn_name.to_string().replace("_", "-")
+        fn_name.to_string()
     };
 
     let binding_tokens: Vec<_> = inputs.iter().filter_map(|arg| {

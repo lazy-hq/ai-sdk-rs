@@ -16,9 +16,7 @@ pub struct ToolExecute {
 impl ToolExecute {
     pub fn call(&self, map: Value) -> Result<String> {
         let mut guard = self.inner.lock().unwrap();
-        (guard)(map).map_err(|e| {
-            Error::Other(e) // TODO: use tool specific errors
-        })
+        (guard)(map).map_err(Error::ToolCallError)
     }
 
     pub fn new(f: ToolFn) -> Self {
@@ -213,7 +211,7 @@ mod tests {
         schemars::schema_for!(String);
         let tool = my_example_tool();
 
-        assert_eq!(tool.name, "my-example-tool");
+        assert_eq!(tool.name, "my_example_tool");
         assert_eq!(
             tool.description,
             " This is The Description of an example tool."
