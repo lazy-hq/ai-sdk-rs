@@ -12,7 +12,9 @@ We welcome contributions! To ensure smooth collaboration, please follow these gu
    Use GitHub issues to report bugs, request features, or ask questions.
 
 3. **Submit PRs**
-   Fork the repository, make your changes, and open a pull request. Please reference the related issue in your PR description.
+   - Fork the repository, make your changes
+   - Write change log to describe your changes in CHANGELOG.md following the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format.
+   - Open a pull request. Please reference the related issue in your PR description.
 
 4. **Code Style**
    Follow Rust conventions. Before committing, run:
