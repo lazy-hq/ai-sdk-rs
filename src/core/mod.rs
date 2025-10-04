@@ -10,11 +10,16 @@
 pub mod language_model;
 pub mod messages;
 pub mod provider;
+pub mod tools;
 pub mod utils;
+
+pub use aisdk_macros::tool;
 
 // Re-export key components to provide a clean public API.
 pub use language_model::{
-    GenerateTextResponse, LanguageModel, LanguageModelRequest, StreamTextResponse,
+    GenerateTextResponse, LanguageModel, LanguageModelRequest, LanguageModelStreamChunkType,
+    StreamTextResponse,
 };
 pub use messages::{AssistantMessage, Message, Role, SystemMessage, UserMessage};
 pub use provider::Provider;
+pub use tools::{Tool, ToolCallInfo, ToolOutputInfo};

@@ -1,3 +1,4 @@
+use crate::core::{ToolCallInfo, ToolOutputInfo};
 use serde::{Deserialize, Serialize};
 
 /// Role for model messages.
@@ -14,6 +15,8 @@ pub enum Message {
     System(SystemMessage),
     User(UserMessage),
     Assistant(AssistantMessage),
+    Tool(ToolOutputInfo),
+    Developer(String),
 }
 
 impl Message {
@@ -113,25 +116,16 @@ impl From<&str> for UserMessage {
         Self::new(value)
     }
 }
-/// Assistant model message.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AssistantMessage {
-    role: Role,
-    pub content: String,
-}
 
-impl AssistantMessage {
-    pub fn new(content: impl Into<String>) -> Self {
-        Self {
-            role: Role::Assistant,
-            content: content.into(),
-        }
-    }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AssistantMessage {
+    Text(String),
+    ToolCall(ToolCallInfo),
 }
 
 impl From<String> for AssistantMessage {
     fn from(value: String) -> Self {
-        Self::new(value)
+        Self::Text(value)
     }
 }
 
