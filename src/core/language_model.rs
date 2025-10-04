@@ -5,9 +5,9 @@
 //! underlying implementation details of different AI providers, offering a
 //! unified interface for various operations like text generation or streaming.
 
-use crate::core::tools::Tool;
-use crate::core::utils::resolve_message;
-use crate::core::{AssistantMessage, Message, ToolCallInfo, ToolOutputInfo};
+use crate::core::tools::{Tool, ToolList};
+use crate::core::utils::{handle_tool_call, resolve_message};
+use crate::core::{Message, ToolCallInfo};
 use crate::error::{Error, Result};
 use async_trait::async_trait;
 use derive_builder::Builder;
@@ -24,7 +24,7 @@ use std::task::{Context, Poll};
 // ============================================================================
 // Section: constants
 // ============================================================================
-const DEFAULT_TOOL_STEP_COUNT: usize = 3;
+pub const DEFAULT_TOOL_STEP_COUNT: usize = 3;
 
 // ============================================================================
 // Section: traits
@@ -119,7 +119,7 @@ pub struct LanguageModelOptions {
     pub steps: Option<Vec<serde_json::Value>>,
 
     /// List of tools to use.
-    pub tools: Option<Vec<Tool>>,
+    pub tools: Option<ToolList>,
     // TODO: add support for reponse format
     // pub response_format: Option<ResponseFormat>,
 
@@ -442,7 +442,7 @@ impl<M: LanguageModel> LanguageModelRequestBuilder<M, OptionsStage> {
     }
 
     pub fn with_tool(mut self, tool: Tool) -> Self {
-        self.tools.get_or_insert_default().push(tool);
+        self.tools.get_or_insert_default().add_tool(tool);
         self
     }
 
@@ -531,70 +531,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
         let text = match response.content {
             LanguageModelResponseContentType::Text(text) => text,
             LanguageModelResponseContentType::ToolCall(tool_info) => {
-                //get tool
-                let mut tool = None;
-                if let Some(tools) = &options.tools {
-                    for t in tools {
-                        if t.name == tool_info.tool.name {
-                            tool = Some(t);
-                        }
-                    }
-                };
-
-                //get tool results
-                let mut tool_result = None;
-                if let Some(tool) = tool {
-                    match tool.execute.call(tool_info.input.clone()) {
-                        Ok(tr) => {
-                            tool_result = Some(tr);
-                        }
-                        Err(tool_result_err) => {
-                            let schema =
-                                serde_json::json!({ "error": String::from(tool_result_err) });
-                            tool_result = Some(schema.to_string());
-                        }
-                    };
-                };
-
-                // update messages
-                if let Some(tool) = tool {
-                    let mut tool_output_info = ToolOutputInfo::new(&tool.name);
-                    tool_output_info.output(serde_json::Value::String(
-                        tool_result.unwrap_or("".to_string()),
-                    ));
-                    tool_output_info.id(&tool_info.tool.id);
-
-                    let _ = &options
-                        .messages
-                        .push(Message::Assistant(AssistantMessage::ToolCall(tool_info)));
-                    let _ = &options
-                        .messages
-                        .push(Message::Tool(tool_output_info.clone()));
-
-                    log::debug!(
-                        "adding step({}): {:#?}",
-                        &self.step_count.unwrap_or_default(),
-                        &tool_output_info.output
-                    );
-                    self.steps
-                        .get_or_insert_default()
-                        .push(tool_output_info.output);
-                };
-
-                if let Some(step_count) = &self.step_count {
-                    if *step_count == 0 {
-                        log::debug!("Maximum tool calls cycle reached: {:#?}", &self.steps);
-                        self.tools = None; // remove the tools
-                        let _ = &options.messages.push(Message::Developer(
-                            "Error: Maximum tool calls cycle reached".to_string(),
-                        ));
-                    } else {
-                        self.step_count = Some(step_count - 1);
-                    }
-                } else {
-                    let step_count = DEFAULT_TOOL_STEP_COUNT - 1;
-                    self.step_count = Some(step_count);
-                }
+                handle_tool_call(self, &mut options, vec![tool_info]);
 
                 self.messages = options.messages.clone();
                 Box::pin(self.generate_text()).await?.text
@@ -635,64 +572,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
         while let Some(chunk) = response.stream.next().await {
             match chunk {
                 Ok(LanguageModelStreamChunkType::ToolCall(tool_info)) => {
-                    //get tool
-                    let mut tool = None;
-                    if let Some(tools) = &options.tools {
-                        for t in tools {
-                            if t.name == tool_info.tool.name {
-                                tool = Some(t);
-                            }
-                        }
-                    };
-
-                    //get tool results
-                    let mut tool_result = None;
-                    if let Some(tool) = tool {
-                        match tool.execute.call(tool_info.input.clone()) {
-                            Ok(tr) => {
-                                tool_result = Some(tr);
-                            }
-                            Err(tool_result_err) => {
-                                let schema =
-                                    serde_json::json!({ "error": String::from(tool_result_err) });
-                                tool_result = Some(schema.to_string());
-                            }
-                        };
-                    };
-
-                    // update messages
-                    if let Some(tool) = tool {
-                        let mut tool_output_info = ToolOutputInfo::new(&tool.name);
-                        tool_output_info.output(serde_json::Value::String(
-                            tool_result.unwrap_or("".to_string()),
-                        ));
-                        tool_output_info.id(&tool_info.tool.id);
-
-                        let _ = &options
-                            .messages
-                            .push(Message::Assistant(AssistantMessage::ToolCall(tool_info)));
-                        let _ = &options
-                            .messages
-                            .push(Message::Tool(tool_output_info.clone()));
-
-                        self.steps
-                            .get_or_insert_default()
-                            .push(tool_output_info.output);
-                    };
-
-                    if let Some(step_count) = &self.step_count {
-                        if *step_count == 0 {
-                            self.tools = None; // remove the tools
-                            let _ = &options.messages.push(Message::Developer(
-                                "Error: Maximum tool calls cycle reached".to_string(),
-                            ));
-                        } else {
-                            self.step_count = Some(step_count - 1);
-                        }
-                    } else {
-                        let step_count = DEFAULT_TOOL_STEP_COUNT - 1;
-                        self.step_count = Some(step_count);
-                    }
+                    handle_tool_call(self, &mut options, vec![tool_info]);
 
                     self.messages = options.messages.clone();
                     let next_res = Box::pin(self.stream_text()).await;

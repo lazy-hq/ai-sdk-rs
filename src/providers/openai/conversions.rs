@@ -51,9 +51,12 @@ impl From<LanguageModelOptions> for CreateResponse {
             );
         }
 
-        let tools: Option<Vec<ToolDefinition>> = options
-            .tools
-            .map(|t| t.iter().map(|t| ToolDefinition::from(t.clone())).collect());
+        let tools: Option<Vec<ToolDefinition>> = options.tools.map(|t| {
+            t.tools
+                .iter()
+                .map(|t| ToolDefinition::from(t.clone()))
+                .collect()
+        });
 
         CreateResponse {
             input: Input::Items(items),

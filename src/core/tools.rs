@@ -87,7 +87,7 @@ impl Tool {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ToolList {
-    tools: Vec<Tool>,
+    pub tools: Vec<Tool>,
 }
 
 impl ToolList {
