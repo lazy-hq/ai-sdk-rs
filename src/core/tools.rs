@@ -98,6 +98,32 @@ impl ToolList {
     pub fn add_tool(&mut self, tool: Tool) {
         self.tools.push(tool);
     }
+
+    pub fn execute(&self, tool_infos: Vec<ToolCallInfo>) -> Vec<Option<String>> {
+        let mut tool_result = Vec::new();
+
+        tool_infos.iter().for_each(|info| {
+            let tool = self
+                .tools
+                .iter()
+                .find(|t| t.name == info.tool.name)
+                .unwrap();
+
+            match tool.execute.call(info.input.clone()) {
+                Ok(tr) => {
+                    tool_result.push(Some(tr));
+                }
+                Err(tool_result_err) => {
+                    let schema = serde_json::json!({ "error": String::from(tool_result_err) });
+                    tool_result.push(Some(schema.to_string()));
+                }
+            };
+        });
+
+        tool_result
+    }
+}
+
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 /// Describes a tool
 pub struct ToolDetails {
