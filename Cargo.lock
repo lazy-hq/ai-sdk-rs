@@ -39,7 +39,6 @@ dependencies = [
  "futures",
  "glob",
  "log",
- "once_cell",
  "schemars",
  "serde",
  "serde_json",

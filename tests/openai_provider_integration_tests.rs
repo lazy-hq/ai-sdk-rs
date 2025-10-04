@@ -28,6 +28,7 @@ async fn test_generate_text_with_openai() {
         .build()
         .generate_text()
         .await;
+
     assert!(result.is_ok());
 
     let text = result.as_ref().expect("Failed to get result").text.trim();

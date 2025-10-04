@@ -516,7 +516,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
             LanguageModelResponseContentType::Text(text) => text,
             LanguageModelResponseContentType::ToolCall(tool_info) => {
                 let mut new_steps = Vec::new();
-                handle_tool_call(&mut options, vec![tool_info], &mut new_steps);
+                handle_tool_call(&mut options, vec![tool_info], &mut new_steps).await;
 
                 // update anything that might change in `handle_tool_call`
                 self.messages = options.messages.clone();
@@ -566,7 +566,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
             match chunk {
                 Ok(LanguageModelStreamChunkType::ToolCall(tool_info)) => {
                     let mut cur_steps = Vec::new();
-                    handle_tool_call(&mut options, vec![tool_info], &mut cur_steps);
+                    handle_tool_call(&mut options, vec![tool_info], &mut cur_steps).await;
 
                     // update anything that might change in `handle_tool_call`
                     self.messages = options.messages.clone();
