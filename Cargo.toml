@@ -29,6 +29,7 @@ schemars = "1.0.4"
 thiserror = "2.0.12"
 derive_builder = "0.20.2"
 futures = "0.3"
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
 aisdk-macros = { path = "macros" }
 async-openai = { version = "0.29.3", optional = true }
 

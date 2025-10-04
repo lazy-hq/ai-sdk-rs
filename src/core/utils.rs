@@ -1,5 +1,5 @@
 use crate::core::{
-    AssistantMessage, Message, ToolCallInfo, ToolOutputInfo,
+    Message, ToolCallInfo, ToolOutputInfo,
     language_model::{DEFAULT_TOOL_STEP_COUNT, LanguageModelOptions},
 };
 
@@ -35,40 +35,35 @@ pub fn resolve_message(
     (system, messages)
 }
 
-pub fn handle_tool_call(
+pub async fn handle_tool_call(
     options: &mut LanguageModelOptions,
     tool_infos: Vec<ToolCallInfo>,
     steps: &mut Vec<ToolOutputInfo>,
 ) {
-    let tool_results = &options
-        .tools
-        .as_ref()
-        .map(|tools| tools.execute(tool_infos.clone()));
-
-    if let Some(tool_results) = tool_results {
+    if let Some(tools) = &options.tools {
+        let tool_results = tools.execute(tool_infos.clone()).await;
         let mut tool_output_infos = Vec::new();
         tool_results
-            .iter()
+            .into_iter()
             .zip(tool_infos)
             .for_each(|(tool_result, tool_info)| {
                 let mut tool_output_info = ToolOutputInfo::new(&tool_info.tool.name);
-                tool_output_info.output(serde_json::Value::String(
-                    tool_result.clone().unwrap_or("".to_string()),
-                ));
-
+                let output = match tool_result {
+                    Ok(result) => serde_json::Value::String(result),
+                    Err(err) => serde_json::Value::String(format!("Error: {}", err)),
+                };
+                tool_output_info.output(output);
                 tool_output_info.id(&tool_info.tool.id);
                 tool_output_infos.push(tool_output_info.clone());
 
                 // update messages
-                let _ = &options
-                    .messages
-                    .push(Message::Assistant(AssistantMessage::ToolCall(tool_info)));
-                let _ = &options
-                    .messages
-                    .push(Message::Tool(tool_output_info.clone()));
-
-                steps.push(tool_output_info);
+                let _ = &options.messages.push(Message::Assistant(
+                    crate::core::AssistantMessage::ToolCall(tool_info),
+                ));
+                let _ = &options.messages.push(Message::Tool(tool_output_info));
             });
+        *steps = tool_output_infos;
+        println!("steps: {:?}", steps);
     }
 
     if let Some(step_count) = &options.step_count {

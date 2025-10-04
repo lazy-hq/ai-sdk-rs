@@ -14,7 +14,7 @@ pub struct ToolExecute {
 }
 
 impl ToolExecute {
-    pub fn call(&self, map: Value) -> Result<String> {
+    pub async fn call(&self, map: Value) -> Result<String> {
         let mut guard = self.inner.lock().unwrap();
         (guard)(map).map_err(Error::ToolCallError)
     }
@@ -97,28 +97,28 @@ impl ToolList {
         self.tools.push(tool);
     }
 
-    pub fn execute(&self, tool_infos: Vec<ToolCallInfo>) -> Vec<Option<String>> {
-        let mut tool_result = Vec::new();
+    pub async fn execute(&self, tool_infos: Vec<ToolCallInfo>) -> Vec<Result<String>> {
+        use futures::future::join_all;
 
-        tool_infos.iter().for_each(|info| {
-            let tool = self
-                .tools
-                .iter()
-                .find(|t| t.name == info.tool.name)
-                .unwrap();
-
-            match tool.execute.call(info.input.clone()) {
-                Ok(tr) => {
-                    tool_result.push(Some(tr));
+        let tools = self.tools.clone();
+        let tasks = tool_infos.into_iter().map(|info| {
+            let tools = tools.clone();
+            tokio::spawn(async move {
+                let tool = tools.iter().find(|t| t.name == info.tool.name);
+                match tool {
+                    Some(tool) => tool.execute.call(info.input).await,
+                    None => Err(crate::error::Error::ToolCallError(
+                        "Tool not found".to_string(),
+                    )),
                 }
-                Err(tool_result_err) => {
-                    let schema = serde_json::json!({ "error": String::from(tool_result_err) });
-                    tool_result.push(Some(schema.to_string()));
-                }
-            };
+            })
         });
 
-        tool_result
+        join_all(tasks)
+            .await
+            .into_iter()
+            .map(|res| res.unwrap())
+            .collect()
     }
 }
 
@@ -206,8 +206,8 @@ mod tests {
         Ok(format!("{}{}", a, b.unwrap_or(0)))
     }
 
-    #[test]
-    fn test_tool_macro_with_no_args() {
+    #[tokio::test]
+    async fn test_tool_macro_with_no_args() {
         schemars::schema_for!(String);
         let tool = my_example_tool();
 
@@ -247,6 +247,7 @@ mod tests {
                     .into_iter()
                     .collect()
                 ))
+                .await
                 .unwrap(),
             "10".to_string()
         );
