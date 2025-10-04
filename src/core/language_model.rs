@@ -7,7 +7,7 @@
 
 use crate::core::tools::{Tool, ToolList};
 use crate::core::utils::{handle_tool_call, resolve_message};
-use crate::core::{Message, ToolCallInfo};
+use crate::core::{Message, ToolCallInfo, ToolOutputInfo};
 use crate::error::{Error, Result};
 use async_trait::async_trait;
 use derive_builder::Builder;
@@ -115,8 +115,6 @@ pub struct LanguageModelOptions {
     /// Number tool call cycles to make
     pub step_count: Option<usize>,
 
-    /// Output from each tool call
-
     /// List of tools to use.
     pub tools: Option<ToolList>,
     // TODO: add support for reponse format
@@ -160,10 +158,6 @@ pub struct LanguageModelResponse {
     pub stop_reason: Option<String>,
 }
 
-//#[derive(Debug, Clone, Serialize, Deserialize)]
-//pub enum LanguageModelResponseType {
-//}
-
 impl LanguageModelResponse {
     /// Creates a new response with the generated text.
     pub fn new(text: impl Into<String>) -> Self {
@@ -173,12 +167,6 @@ impl LanguageModelResponse {
             stop_reason: None,
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum LanguageModelChunkState<T> {
-    InProgress(T),
-    Final(Option<T>),
 }
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -207,13 +195,15 @@ pub struct LanguageModelStreamResponse {
 
     /// The model that generated the response.
     pub model: Option<String>,
+
+    /// The reason the model stopped generating text.
+    pub stop_reason: Option<String>,
 }
 
 /// Stream of responses from mapped to a common interface.
 pub type LanguageModelStream =
     Pin<Box<dyn Stream<Item = Result<LanguageModelStreamChunkType>> + Send>>;
 
-/// alternavite approach for --^
 // Struct wrapper for MPMC channel to act as a stream
 pub struct MpmcStream {
     receiver: Receiver<LanguageModelStreamChunkType>,
@@ -473,7 +463,7 @@ impl<M: LanguageModel> LanguageModelRequestBuilder<M, OptionsStage> {
 pub struct GenerateTextResponse {
     /// The generated text.
     pub text: String,
-    pub steps: Option<Vec<serde_json::Value>>,
+    pub steps: Option<Vec<ToolOutputInfo>>,
 }
 
 impl GenerateTextResponse {
@@ -482,8 +472,8 @@ impl GenerateTextResponse {
     }
 }
 
-//TODO: add standard response fields
-/// Response from a stream call on `StreamText`.
+// TODO: add standard response fields
+// Response from a stream call on `StreamText`.
 pub struct StreamTextResponse {
     /// A stream of responses from the language model.
     pub stream: MpmcStream,
@@ -492,7 +482,7 @@ pub struct StreamTextResponse {
     pub model: Option<String>,
 
     /// Tool output from each tool call.
-    pub steps: Option<Vec<serde_json::Value>>,
+    pub steps: Option<Vec<ToolOutputInfo>>,
 }
 
 // ============================================================================
@@ -521,7 +511,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
 
         let response = self.model.generate(options.clone()).await?;
 
-        let mut steps: Option<Vec<serde_json::Value>> = None;
+        let mut steps: Option<Vec<ToolOutputInfo>> = None;
         let text = match response.content {
             LanguageModelResponseContentType::Text(text) => text,
             LanguageModelResponseContentType::ToolCall(tool_info) => {
@@ -531,6 +521,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
                 // update anything that might change in `handle_tool_call`
                 self.messages = options.messages.clone();
                 self.tools = options.tools;
+                self.step_count = options.step_count;
 
                 // call the next step
                 let result = Box::pin(self.generate_text()).await?;
@@ -569,7 +560,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
 
         let mut response = self.model.generate_stream(options.to_owned()).await?;
 
-        let mut steps: Option<Vec<serde_json::Value>> = None;
+        let mut steps: Option<Vec<ToolOutputInfo>> = None;
         let (tx, stream) = MpmcStream::new();
         while let Some(chunk) = response.stream.next().await {
             match chunk {
@@ -580,6 +571,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
                     // update anything that might change in `handle_tool_call`
                     self.messages = options.messages.clone();
                     self.tools = options.tools.clone();
+                    self.step_count = options.step_count;
 
                     // call the next step
                     let next_res = Box::pin(self.stream_text()).await;

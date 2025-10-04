@@ -38,7 +38,7 @@ pub fn resolve_message(
 pub fn handle_tool_call(
     options: &mut LanguageModelOptions,
     tool_infos: Vec<ToolCallInfo>,
-    steps: &mut Vec<serde_json::Value>,
+    steps: &mut Vec<ToolOutputInfo>,
 ) {
     let tool_results = &options
         .tools
@@ -67,12 +67,13 @@ pub fn handle_tool_call(
                     .messages
                     .push(Message::Tool(tool_output_info.clone()));
 
-                steps.push(tool_output_info.output);
+                steps.push(tool_output_info);
             });
     }
 
     if let Some(step_count) = &options.step_count {
-        if *step_count == 0 {
+        println!("step({step_count})");
+        if *step_count == 1 {
             options.tools = None; // remove the tools
             let _ = &options.messages.push(Message::Developer(
                 "Error: Maximum tool calls cycle reached".to_string(),
@@ -81,6 +82,7 @@ pub fn handle_tool_call(
             options.step_count = Some(step_count - 1);
         }
     } else {
+        println!("step({DEFAULT_TOOL_STEP_COUNT})");
         let step_count = DEFAULT_TOOL_STEP_COUNT - 1;
         options.step_count = Some(step_count);
     }

@@ -172,6 +172,7 @@ impl LanguageModel for OpenAI {
         Ok(LanguageModelStreamResponse {
             stream: Box::pin(stream),
             model,
+            stop_reason: None,
         })
     }
 }
