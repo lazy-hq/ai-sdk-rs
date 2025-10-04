@@ -116,7 +116,6 @@ pub struct LanguageModelOptions {
     pub step_count: Option<usize>,
 
     /// Output from each tool call
-    pub steps: Option<Vec<serde_json::Value>>,
 
     /// List of tools to use.
     pub tools: Option<ToolList>,
@@ -446,11 +445,6 @@ impl<M: LanguageModel> LanguageModelRequestBuilder<M, OptionsStage> {
         self
     }
 
-    pub fn with_step(mut self, output: serde_json::Value) -> Self {
-        self.steps.get_or_insert_default().push(output);
-        self
-    }
-
     pub fn step_count(mut self, step_count: usize) -> Self {
         self.step_count = Some(step_count);
         self
@@ -522,26 +516,34 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
             schema: self.options.schema.to_owned(),
             stop_sequences: self.options.stop_sequences.to_owned(),
             tools: self.options.tools.to_owned(),
-            steps: self.options.steps.to_owned(),
             ..self.options
         };
 
         let response = self.model.generate(options.clone()).await?;
 
+        let mut steps: Option<Vec<serde_json::Value>> = None;
         let text = match response.content {
             LanguageModelResponseContentType::Text(text) => text,
             LanguageModelResponseContentType::ToolCall(tool_info) => {
-                handle_tool_call(self, &mut options, vec![tool_info]);
+                let mut new_steps = Vec::new();
+                handle_tool_call(&mut options, vec![tool_info], &mut new_steps);
 
+                // update anything that might change in `handle_tool_call`
                 self.messages = options.messages.clone();
-                Box::pin(self.generate_text()).await?.text
+                self.tools = options.tools;
+
+                // call the next step
+                let result = Box::pin(self.generate_text()).await?;
+
+                // update steps
+                new_steps.extend(result.steps.unwrap_or_default());
+                steps = Some(new_steps);
+
+                result.text
             }
         };
 
-        let result = GenerateTextResponse {
-            text,
-            steps: self.steps.clone(),
-        };
+        let result = GenerateTextResponse { text, steps };
 
         Ok(result)
     }
@@ -562,22 +564,36 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
             schema: self.options.schema.to_owned(),
             stop_sequences: self.options.stop_sequences.to_owned(),
             tools: self.options.tools.to_owned(),
-            steps: self.options.steps.to_owned(),
             ..self.options
         };
 
         let mut response = self.model.generate_stream(options.to_owned()).await?;
 
+        let mut steps: Option<Vec<serde_json::Value>> = None;
         let (tx, stream) = MpmcStream::new();
         while let Some(chunk) = response.stream.next().await {
             match chunk {
                 Ok(LanguageModelStreamChunkType::ToolCall(tool_info)) => {
-                    handle_tool_call(self, &mut options, vec![tool_info]);
+                    let mut cur_steps = Vec::new();
+                    handle_tool_call(&mut options, vec![tool_info], &mut cur_steps);
 
+                    // update anything that might change in `handle_tool_call`
                     self.messages = options.messages.clone();
+                    self.tools = options.tools.clone();
+
+                    // call the next step
                     let next_res = Box::pin(self.stream_text()).await;
+
                     match next_res {
-                        Ok(StreamTextResponse { mut stream, .. }) => {
+                        Ok(StreamTextResponse {
+                            mut stream,
+                            steps: next_steps,
+                            ..
+                        }) => {
+                            // update steps
+                            cur_steps.extend(next_steps.unwrap_or_default());
+                            steps = Some(cur_steps);
+
                             while let Some(chunk) = stream.next().await {
                                 let _ = tx.send(chunk);
                             }
@@ -601,7 +617,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
         let result = StreamTextResponse {
             stream,
             model: response.model,
-            steps: self.steps.clone(),
+            steps,
         };
 
         Ok(result)

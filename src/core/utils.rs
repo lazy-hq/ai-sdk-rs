@@ -1,5 +1,5 @@
 use crate::core::{
-    AssistantMessage, LanguageModel, LanguageModelRequest, Message, ToolCallInfo, ToolOutputInfo,
+    AssistantMessage, Message, ToolCallInfo, ToolOutputInfo,
     language_model::{DEFAULT_TOOL_STEP_COUNT, LanguageModelOptions},
 };
 
@@ -35,10 +35,10 @@ pub fn resolve_message(
     (system, messages)
 }
 
-pub fn handle_tool_call<T: LanguageModel>(
-    s: &mut LanguageModelRequest<T>,
+pub fn handle_tool_call(
     options: &mut LanguageModelOptions,
     tool_infos: Vec<ToolCallInfo>,
+    steps: &mut Vec<serde_json::Value>,
 ) {
     let tool_results = &options
         .tools
@@ -67,24 +67,21 @@ pub fn handle_tool_call<T: LanguageModel>(
                     .messages
                     .push(Message::Tool(tool_output_info.clone()));
 
-                s.steps
-                    .get_or_insert_default()
-                    .push(tool_output_info.output);
+                steps.push(tool_output_info.output);
             });
     }
 
-    if let Some(step_count) = &s.step_count {
+    if let Some(step_count) = &options.step_count {
         if *step_count == 0 {
-            log::debug!("Maximum tool calls cycle reached: {:#?}", &s.steps);
-            s.tools = None; // remove the tools
+            options.tools = None; // remove the tools
             let _ = &options.messages.push(Message::Developer(
                 "Error: Maximum tool calls cycle reached".to_string(),
             ));
         } else {
-            s.step_count = Some(step_count - 1);
+            options.step_count = Some(step_count - 1);
         }
     } else {
         let step_count = DEFAULT_TOOL_STEP_COUNT - 1;
-        s.step_count = Some(step_count);
+        options.step_count = Some(step_count);
     }
 }
