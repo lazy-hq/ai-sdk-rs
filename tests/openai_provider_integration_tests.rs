@@ -288,7 +288,7 @@ async fn test_generate_text_with_tools_and_step_counts() {
 
     let response = LanguageModelRequest::builder()
         .model(OpenAI::new("gpt-4o"))
-        .system("Call a tool to get the username. try again if it fails.")
+        .system("Call a tool to get the username. try again if not found or get an error.")
         .prompt("What is the username?")
         .step_count(2)
         .with_tool(get_username())
