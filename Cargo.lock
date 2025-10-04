@@ -38,7 +38,6 @@ dependencies = [
  "dotenv",
  "futures",
  "log",
- "once_cell",
  "schemars",
  "serde",
  "serde_json",
