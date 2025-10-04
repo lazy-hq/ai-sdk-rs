@@ -11,15 +11,17 @@ keywords = ["ai", "sdk", "aisdk", "ai-sdk-rs", "openai"]
 categories = ["api-bindings", "asynchronous"]
 
 [features]
-full = ["openai"]
+full = ["openai", "prompt"]
 openai = ["async-openai"]
+prompt = ["tera", "glob"]
 
 [[test]]
 name = "openai_provider_integration_tests"
 required-features = ["openai"]
 
 [dependencies]
-tera = "1"
+tera = { version = "1", optional = true }
+glob = { version = "0.3", optional = true }
 once_cell = "1.19.0"
 log = "0.4"
 async-trait = "0.1.88"
