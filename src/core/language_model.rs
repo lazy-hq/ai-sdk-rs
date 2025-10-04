@@ -46,8 +46,10 @@ pub trait LanguageModel: Send + Sync + std::fmt::Debug {
     /// # Errors
     ///
     /// Returns an `Error` if the API call fails or the request is invalid.
-    //TODO: rename to generate_text
-    async fn generate(&mut self, options: LanguageModelOptions) -> Result<LanguageModelResponse>;
+    async fn generate_text(
+        &mut self,
+        options: LanguageModelOptions,
+    ) -> Result<LanguageModelResponse>;
 
     /// Performs a streaming text generation request.
     ///
@@ -56,8 +58,7 @@ pub trait LanguageModel: Send + Sync + std::fmt::Debug {
     /// # Errors
     ///
     /// Returns an `Error` if the API call fails or the request is invalid.
-    //TODO: rename to stream_text
-    async fn generate_stream(
+    async fn stream_text(
         &mut self,
         options: LanguageModelOptions,
     ) -> Result<LanguageModelStreamResponse>;
@@ -117,9 +118,6 @@ pub struct LanguageModelOptions {
 
     /// List of tools to use.
     pub tools: Option<ToolList>,
-    // TODO: add support for reponse format
-    // pub response_format: Option<ResponseFormat>,
-
     // Additional provider-specific options. They are passed through
     // to the provider from the AI SDK and enable provider-specific functionality.
     //TODO: add support for provider options
@@ -509,7 +507,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
             ..self.options
         };
 
-        let response = self.model.generate(options.clone()).await?;
+        let response = self.model.generate_text(options.clone()).await?;
 
         let mut steps: Option<Vec<ToolOutputInfo>> = None;
         let text = match response.content {
@@ -558,7 +556,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
             ..self.options
         };
 
-        let mut response = self.model.generate_stream(options.to_owned()).await?;
+        let mut response = self.model.stream_text(options.to_owned()).await?;
 
         let mut steps: Option<Vec<ToolOutputInfo>> = None;
         let (tx, stream) = MpmcStream::new();

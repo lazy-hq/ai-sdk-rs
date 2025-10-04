@@ -49,7 +49,10 @@ impl Provider for OpenAI {}
 
 #[async_trait]
 impl LanguageModel for OpenAI {
-    async fn generate(&mut self, options: LanguageModelOptions) -> Result<LanguageModelResponse> {
+    async fn generate_text(
+        &mut self,
+        options: LanguageModelOptions,
+    ) -> Result<LanguageModelResponse> {
         let mut request: CreateResponse = options.clone().into();
 
         request.model = self.settings.model_name.to_string();
@@ -85,7 +88,7 @@ impl LanguageModel for OpenAI {
         })
     }
 
-    async fn generate_stream(
+    async fn stream_text(
         &mut self,
         options: LanguageModelOptions,
     ) -> Result<LanguageModelStreamResponse> {
