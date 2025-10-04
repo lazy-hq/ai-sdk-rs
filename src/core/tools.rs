@@ -1,5 +1,6 @@
 use crate::error::{Error, Result};
 use derive_builder::Builder;
+use futures::future::join_all;
 use schemars::Schema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -98,8 +99,6 @@ impl ToolList {
     }
 
     pub async fn execute(&self, tool_infos: Vec<ToolCallInfo>) -> Vec<Result<String>> {
-        use futures::future::join_all;
-
         let tools = self.tools.clone();
         let tasks = tool_infos.into_iter().map(|info| {
             let tools = tools.clone();
