@@ -1,7 +1,7 @@
 //! Helper functions and conversions for the OpenAI provider.
 
 use crate::core::language_model::LanguageModelOptions;
-use crate::core::messages::AssistantMessage;
+use crate::core::language_model::LanguageModelResponseContentType;
 use crate::core::messages::Message;
 use crate::core::tools::Tool;
 use async_openai::types::ResponseFormatJsonSchema;
@@ -94,12 +94,12 @@ impl From<Message> for InputItem {
                 InputItem::Custom(custom_msg)
             }
             Message::Assistant(ref assistant_msg) => match assistant_msg {
-                AssistantMessage::Text(msg) => {
+                LanguageModelResponseContentType::Text(msg) => {
                     text_inp.role = Role::Assistant;
                     text_inp.content = InputContent::TextInput(msg.to_owned());
                     InputItem::Message(text_inp)
                 }
-                AssistantMessage::ToolCall(tool_info) => {
+                LanguageModelResponseContentType::ToolCall(tool_info) => {
                     let mut custom_msg = Value::Object(serde_json::Map::new());
                     custom_msg["arguments"] = Value::String(tool_info.input.to_string().clone());
                     custom_msg["call_id"] = Value::String(tool_info.tool.id.clone());

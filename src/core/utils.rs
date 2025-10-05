@@ -1,6 +1,8 @@
 use crate::core::{
     Message, ToolCallInfo, ToolOutputInfo,
-    language_model::{DEFAULT_TOOL_STEP_COUNT, LanguageModelOptions},
+    language_model::{
+        DEFAULT_TOOL_STEP_COUNT, LanguageModelOptions, LanguageModelResponseContentType,
+    },
 };
 
 /// Resolves the message to be used for text generation.
@@ -58,7 +60,7 @@ pub async fn handle_tool_call(
 
                 // update messages
                 let _ = &options.messages.push(Message::Assistant(
-                    crate::core::AssistantMessage::ToolCall(tool_info),
+                    LanguageModelResponseContentType::ToolCall(tool_info),
                 ));
                 let _ = &options.messages.push(Message::Tool(tool_output_info));
             });

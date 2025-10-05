@@ -1,4 +1,4 @@
-use crate::core::{ToolCallInfo, ToolOutputInfo};
+use crate::core::{ToolOutputInfo, language_model::LanguageModelResponseContentType};
 use serde::{Deserialize, Serialize};
 
 /// Role for model messages.
@@ -14,7 +14,7 @@ pub enum Role {
 pub enum Message {
     System(SystemMessage),
     User(UserMessage),
-    Assistant(AssistantMessage),
+    Assistant(LanguageModelResponseContentType),
     Tool(ToolOutputInfo),
     Developer(String),
 }
@@ -114,18 +114,6 @@ impl From<String> for UserMessage {
 impl From<&str> for UserMessage {
     fn from(value: &str) -> Self {
         Self::new(value)
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum AssistantMessage {
-    Text(String),
-    ToolCall(ToolCallInfo),
-}
-
-impl From<String> for AssistantMessage {
-    fn from(value: String) -> Self {
-        Self::Text(value)
     }
 }
 

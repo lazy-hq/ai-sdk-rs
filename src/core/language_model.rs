@@ -136,6 +136,12 @@ pub enum LanguageModelResponseContentType {
     ToolCall(ToolCallInfo),
 }
 
+impl From<String> for LanguageModelResponseContentType {
+    fn from(value: String) -> Self {
+        Self::Text(value)
+    }
+}
+
 impl LanguageModelResponseContentType {
     pub fn new(text: impl Into<String>) -> Self {
         Self::Text(text.into())
@@ -461,12 +467,25 @@ impl<M: LanguageModel> LanguageModelRequestBuilder<M, OptionsStage> {
 pub struct GenerateTextResponse {
     /// The generated text.
     pub text: String,
+    /// Each output from a tool call step
     pub steps: Option<Vec<ToolOutputInfo>>,
 }
 
 impl GenerateTextResponse {
     pub fn into_schema<T: DeserializeOwned>(&self) -> std::result::Result<T, serde_json::Error> {
         serde_json::from_str(&self.text)
+    }
+
+    pub fn content(self) -> LanguageModelResponseContentType {
+        todo!()
+    }
+
+    pub fn tool_results(self) -> String {
+        todo!()
+    }
+
+    pub fn reasoning(self) -> String {
+        todo!()
     }
 }
 

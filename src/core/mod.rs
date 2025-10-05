@@ -20,6 +20,6 @@ pub use language_model::{
     GenerateTextResponse, LanguageModel, LanguageModelRequest, LanguageModelStreamChunkType,
     StreamTextResponse,
 };
-pub use messages::{AssistantMessage, Message, Role, SystemMessage, UserMessage};
+pub use messages::{Message, Role, SystemMessage, UserMessage};
 pub use provider::Provider;
 pub use tools::{Tool, ToolCallInfo, ToolOutputInfo};
