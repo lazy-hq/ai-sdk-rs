@@ -93,7 +93,7 @@ impl From<Message> for InputItem {
                 custom_msg["output"] = tool_info.output.clone();
                 InputItem::Custom(custom_msg)
             }
-            Message::Assistant(ref assistant_msg) => match assistant_msg {
+            Message::Assistant(ref assistant_msg) => match &assistant_msg.content {
                 LanguageModelResponseContentType::Text(msg) => {
                     text_inp.role = Role::Assistant;
                     text_inp.content = InputContent::TextInput(msg.to_owned());

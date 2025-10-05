@@ -135,6 +135,9 @@ impl LanguageModel for OpenAI {
                     Ok(ResponseEvent::ResponseOutputTextDelta(d)) => {
                         Some(Ok(LanguageModelStreamChunkType::Text(d.delta)))
                     }
+                    Ok(ResponseEvent::ResponseOutputTextDone(d)) => {
+                        Some(Ok(LanguageModelStreamChunkType::TextDone(d.text)))
+                    }
                     Ok(ResponseEvent::ResponseCompleted(_)) => {
                         state.completed = true;
                         Some(Ok(LanguageModelStreamChunkType::End))
@@ -158,7 +161,7 @@ impl LanguageModel for OpenAI {
                         tool_info.id(tool_call.call_id);
                         tool_info.input(serde_json::from_str(&tool_call.arguments).unwrap());
 
-                        Some(Ok(LanguageModelStreamChunkType::ToolCall(tool_info)))
+                        Some(Ok(LanguageModelStreamChunkType::ToolCallDone(tool_info)))
                     }
                     Ok(resp) => Some(Ok(LanguageModelStreamChunkType::NotImplemented(format!(
                         "{resp:?}"

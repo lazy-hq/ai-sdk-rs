@@ -5,6 +5,7 @@
 //! underlying implementation details of different AI providers, offering a
 //! unified interface for various operations like text generation or streaming.
 
+use crate::core::messages::AssistantMessage;
 use crate::core::tools::{Tool, ToolList};
 use crate::core::utils::{handle_tool_call, resolve_message};
 use crate::core::{Message, ToolCallInfo, ToolOutputInfo};
@@ -15,6 +16,7 @@ use futures::Stream;
 use futures::StreamExt;
 use schemars::{JsonSchema, Schema, schema_for};
 use serde::de::DeserializeOwned;
+use serde::ser::Error as SerdeError;
 use serde::{Deserialize, Serialize};
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
@@ -136,6 +138,12 @@ pub enum LanguageModelResponseContentType {
     ToolCall(ToolCallInfo),
 }
 
+impl Default for LanguageModelResponseContentType {
+    fn default() -> Self {
+        Self::Text(String::new())
+    }
+}
+
 impl From<String> for LanguageModelResponseContentType {
     fn from(value: String) -> Self {
         Self::Text(value)
@@ -180,9 +188,13 @@ pub enum LanguageModelStreamChunkType {
     Start,
     /// Text chunk
     Text(String),
+    /// Text done
+    TextDone(String),
     /// Tool call argument chunk
-    ToolCall(ToolCallInfo),
-    /// The model has stopped generating text.
+    ToolCall(String),
+    /// Tool call done
+    ToolCallDone(ToolCallInfo),
+    /// The model has stopped generating text successfully.
     End,
     /// The model has failed to generate text.
     Failed(String),
@@ -192,21 +204,19 @@ pub enum LanguageModelStreamChunkType {
     NotImplemented(String),
 }
 
-/// A response from a streaming language model.
-pub struct LanguageModelStreamResponse {
-    /// A stream of responses from the language model.
-    pub stream: LanguageModelStream,
-
-    /// The model that generated the response.
-    pub model: Option<String>,
-
-    /// The reason the model stopped generating text.
-    pub stop_reason: Option<String>,
-}
-
 /// Stream of responses from mapped to a common interface.
 pub type LanguageModelStream =
     Pin<Box<dyn Stream<Item = Result<LanguageModelStreamChunkType>> + Send>>;
+
+/// A response from a streaming language model provider.
+pub struct LanguageModelStreamResponse {
+    /// A stream of responses from the language model.
+    pub stream: LanguageModelStream,
+    /// The model that generated the response.
+    pub model: Option<String>,
+    /// The reason the model stopped generating text.
+    pub stop_reason: Option<String>,
+}
 
 // Struct wrapper for MPMC channel to act as a stream
 pub struct MpmcStream {
@@ -392,7 +402,6 @@ impl<M: LanguageModel> LanguageModelRequestBuilder<M, ConversationStage> {
         }
     }
 }
-
 /// OptionsStage Builder
 impl<M: LanguageModel> LanguageModelRequestBuilder<M, OptionsStage> {
     pub fn schema<T: JsonSchema>(mut self) -> Self {
@@ -465,28 +474,44 @@ impl<M: LanguageModel> LanguageModelRequestBuilder<M, OptionsStage> {
 /// Response from a generate call on `GenerateText`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerateTextResponse {
-    /// The generated text.
-    pub text: String,
-    /// Each output from a tool call step
-    pub steps: Option<Vec<ToolOutputInfo>>,
+    /// The options that generated the latest response
+    options: LanguageModelOptions,
+    /// The model that generated the response.
+    model: Option<String>,
 }
 
 impl GenerateTextResponse {
     pub fn into_schema<T: DeserializeOwned>(&self) -> std::result::Result<T, serde_json::Error> {
-        serde_json::from_str(&self.text)
+        if let Some(text) = &self.text() {
+            serde_json::from_str(text)
+        } else {
+            Err(serde_json::Error::custom("No text response found"))
+        }
     }
 
-    pub fn content(self) -> LanguageModelResponseContentType {
-        todo!()
+    // The last content of the response
+    pub fn content(&self) -> Option<&LanguageModelResponseContentType> {
+        match self.options.messages.last() {
+            Some(Message::Assistant(content)) => Some(&content.content),
+            _ => None,
+        }
     }
 
-    pub fn tool_results(self) -> String {
-        todo!()
+    pub fn text(&self) -> Option<&String> {
+        match self.options.messages.last() {
+            Some(Message::Assistant(AssistantMessage {
+                content: LanguageModelResponseContentType::Text(content),
+                ..
+            })) => Some(content),
+            _ => None,
+        }
     }
 
-    pub fn reasoning(self) -> String {
-        todo!()
+    pub fn tool_results(&self) -> Option<Vec<ToolOutputInfo>> {
+        todo!("The tool results")
     }
+    // TODO: Everything that needs to be extracted from the last step
+    // should go here ..
 }
 
 // TODO: add standard response fields
@@ -494,12 +519,10 @@ impl GenerateTextResponse {
 pub struct StreamTextResponse {
     /// A stream of responses from the language model.
     pub stream: MpmcStream,
-
     /// The model that generated the response.
     pub model: Option<String>,
-
-    /// Tool output from each tool call.
-    pub steps: Option<Vec<ToolOutputInfo>>,
+    /// The reason the model stopped generating text.
+    pub options: LanguageModelOptions,
 }
 
 // ============================================================================
@@ -514,8 +537,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
     ///
     /// Returns an `Error` if the underlying model fails to generate a response.
     pub async fn generate_text(&mut self) -> Result<GenerateTextResponse> {
-        let (system_prompt, messages) =
-            resolve_message(&self.options.system, &self.prompt, &self.options.messages);
+        let (system_prompt, messages) = resolve_message(&self.options, &self.prompt);
 
         let mut options = LanguageModelOptions {
             system: Some(system_prompt),
@@ -528,32 +550,25 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
 
         let response = self.model.generate_text(options.clone()).await?;
 
-        let mut steps: Option<Vec<ToolOutputInfo>> = None;
-        let text = match response.content {
-            LanguageModelResponseContentType::Text(text) => text,
+        match response.content {
+            LanguageModelResponseContentType::Text(text) => {
+                options.messages.push(Message::Assistant(text.into()));
+                Ok(GenerateTextResponse {
+                    options,
+                    model: response.model,
+                })
+            }
             LanguageModelResponseContentType::ToolCall(tool_info) => {
-                let mut new_steps = Vec::new();
-                handle_tool_call(&mut options, vec![tool_info], &mut new_steps).await;
+                let mut tool_steps = Vec::new();
+                handle_tool_call(&mut options, vec![tool_info], &mut tool_steps).await;
 
                 // update anything that might change in `handle_tool_call`
-                self.messages = options.messages.clone();
-                self.tools = options.tools;
-                self.step_count = options.step_count;
+                self.options = options;
 
-                // call the next step
-                let result = Box::pin(self.generate_text()).await?;
-
-                // update steps
-                new_steps.extend(result.steps.unwrap_or_default());
-                steps = Some(new_steps);
-
-                result.text
+                // call the next step with the tool results
+                Box::pin(self.generate_text()).await
             }
-        };
-
-        let result = GenerateTextResponse { text, steps };
-
-        Ok(result)
+        }
     }
 
     /// Generates Streaming text using a specified language model.
@@ -563,8 +578,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
     ///
     /// Returns an `Error` if the underlying model fails to generate a response.
     pub async fn stream_text(&mut self) -> Result<StreamTextResponse> {
-        let (system_prompt, messages) =
-            resolve_message(&self.options.system, &self.prompt, &self.options.messages);
+        let (system_prompt, messages) = resolve_message(&self.options, &self.prompt);
 
         let mut options = LanguageModelOptions {
             system: Some(system_prompt),
@@ -577,32 +591,31 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
 
         let mut response = self.model.stream_text(options.to_owned()).await?;
 
-        let mut steps: Option<Vec<ToolOutputInfo>> = None;
         let (tx, stream) = MpmcStream::new();
+        let _ = tx.send(LanguageModelStreamChunkType::Start);
         while let Some(chunk) = response.stream.next().await {
             match chunk {
-                Ok(LanguageModelStreamChunkType::ToolCall(tool_info)) => {
-                    let mut cur_steps = Vec::new();
-                    handle_tool_call(&mut options, vec![tool_info], &mut cur_steps).await;
+                Ok(LanguageModelStreamChunkType::ToolCallDone(tool_info)) => {
+                    let mut current_tool_steps = Vec::new();
+                    handle_tool_call(
+                        &mut options,
+                        vec![tool_info.clone()],
+                        &mut current_tool_steps,
+                    )
+                    .await;
 
                     // update anything that might change in `handle_tool_call`
-                    self.messages = options.messages.clone();
-                    self.tools = options.tools.clone();
-                    self.step_count = options.step_count;
+                    // self.messages = options.messages.clone();
+                    // self.tools = options.tools.clone();
+                    // self.step_count = options.step_count;
+                    self.options = options.clone();
 
                     // call the next step
                     let next_res = Box::pin(self.stream_text()).await;
 
+                    let _ = tx.send(LanguageModelStreamChunkType::ToolCallDone(tool_info));
                     match next_res {
-                        Ok(StreamTextResponse {
-                            mut stream,
-                            steps: next_steps,
-                            ..
-                        }) => {
-                            // update steps
-                            cur_steps.extend(next_steps.unwrap_or_default());
-                            steps = Some(cur_steps);
-
+                        Ok(StreamTextResponse { mut stream, .. }) => {
                             while let Some(chunk) = stream.next().await {
                                 let _ = tx.send(chunk);
                             }
@@ -611,6 +624,12 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
                             let _ = tx.send(LanguageModelStreamChunkType::Failed(e.to_string()));
                         }
                     };
+                }
+                Ok(LanguageModelStreamChunkType::TextDone(text)) => {
+                    self.options
+                        .messages
+                        .push(Message::Assistant(text.clone().into()));
+                    let _ = tx.send(LanguageModelStreamChunkType::TextDone(text));
                 }
                 Ok(other) => {
                     let _ = tx.send(other); // propagate
@@ -626,7 +645,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
         let result = StreamTextResponse {
             stream,
             model: response.model,
-            steps,
+            options,
         };
 
         Ok(result)
