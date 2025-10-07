@@ -20,8 +20,11 @@
 //! //    .generate()
 //! ```
 
+#[cfg(feature = "prompt")]
+use glob;
 use std::collections::HashMap;
 use std::env;
+use std::fs;
 use std::path::PathBuf;
 use tera::{Context, Tera};
 
@@ -30,7 +33,7 @@ use tera::{Context, Tera};
 #[derive(Clone)]
 pub struct PromptEnvironment {
     tera: Tera,
-    prompt_dir: PathBuf,
+    prompt_dirs: Vec<PathBuf>,
 }
 
 impl PromptEnvironment {
@@ -41,14 +44,67 @@ impl PromptEnvironment {
         Self::from_directory(&prompt_dir)
     }
 
+    /// Adds an additional directory to the prompt environment.
+    /// Templates in this directory will override any existing ones with the same name.
+    pub fn add_directory(mut self, prompt_dir_str: &str) -> Self {
+        let prompt_dir = PathBuf::from(prompt_dir_str);
+        self.prompt_dirs.push(prompt_dir.clone());
+        let glob_pattern = format!("{prompt_dir_str}/**/*.*");
+        log::debug!("Adding prompts from: {glob_pattern}");
+        for entry in glob::glob(&glob_pattern).expect("Failed to read glob pattern") {
+            match entry {
+                Ok(path) => {
+                    if path.is_file()
+                        && let Ok(content) = fs::read_to_string(&path)
+                        && let Ok(relative_path) = path.strip_prefix(prompt_dir_str)
+                    {
+                        let name = relative_path.to_string_lossy().to_string();
+                        self.tera
+                            .add_raw_template(&name, &content)
+                            .expect("Failed to add template");
+                    }
+                }
+                Err(e) => log::warn!("Error reading file in {}: {}", prompt_dir_str, e),
+            }
+        }
+        self
+    }
+
     /// Creates a new `PromptEnvironment` from a specific directory path.
     pub fn from_directory(prompt_dir_str: &str) -> Self {
-        let prompt_dir = PathBuf::from(prompt_dir_str);
-        let glob = format!("{prompt_dir_str}/**/*.*");
-        log::debug!("Loading prompts from: {glob}");
-        let mut tera = Tera::new(&glob).expect("Failed to initialize Tera");
+        Self::from_directories(vec![prompt_dir_str])
+    }
+
+    /// Creates a new `PromptEnvironment` from multiple directory paths.
+    /// Directories are loaded in order, with later directories overriding earlier ones.
+    pub fn from_directories(prompt_dir_strs: Vec<&str>) -> Self {
+        let mut tera = Tera::default();
         tera.autoescape_on(vec![]);
-        Self { tera, prompt_dir }
+        let mut prompt_dirs = Vec::new();
+
+        for dir_str in prompt_dir_strs {
+            let prompt_dir = PathBuf::from(dir_str);
+            prompt_dirs.push(prompt_dir.clone());
+            let glob_pattern = format!("{dir_str}/**/*.*");
+            log::debug!("Loading prompts from: {glob_pattern}");
+            for entry in glob::glob(&glob_pattern).expect("Failed to read glob pattern") {
+                match entry {
+                    Ok(path) => {
+                        if path.is_file()
+                            && let Ok(content) = fs::read_to_string(&path)
+                            && let Ok(relative_path) = path.strip_prefix(dir_str)
+                        {
+                            let name = relative_path.to_string_lossy().to_string();
+                            tera.add_raw_template(&name, &content)
+                                .expect("Failed to add template");
+                        }
+                    }
+                    Err(e) => log::warn!("Error reading file in {}: {}", dir_str, e),
+                }
+            }
+        }
+
+        Self { tera, prompt_dirs }
     }
 }
 
@@ -160,7 +216,19 @@ impl Promptable for Prompt {
     /// Returns the file path of the prompt template.
     fn file_path(&self) -> PathBuf {
         let file_name = format!("{}.{}", self.name, self.extension);
-        self.env.prompt_dir.join(file_name)
+        // Search in reverse order (last added dirs first) to find the highest priority template
+        for dir in self.env.prompt_dirs.iter().rev() {
+            let path = dir.join(&file_name);
+            if path.exists() {
+                return path;
+            }
+        }
+        // Fallback to the first dir if not found
+        self.env
+            .prompt_dirs
+            .first()
+            .unwrap_or(&PathBuf::from("."))
+            .join(file_name)
     }
 
     /// Returns the name of the prompt.
@@ -182,7 +250,6 @@ impl Promptable for Prompt {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
     use std::fs;
     use std::path::PathBuf;
     use tempfile::tempdir;
@@ -225,28 +292,36 @@ mod tests {
 
     #[test]
     fn test_file_path() {
-        // Unset PROMPT_DIR to test default
-        unsafe {
-            env::remove_var("PROMPT_DIR");
-        }
-        let prompt = Prompt::new("system/test").with_extension("md");
+        let env = PromptEnvironment::from_directories(vec!["examples/prompts"]);
+        let prompt = Prompt::new_with_env("system/test", env).with_extension("md");
         let path = prompt.file_path();
         assert!(path.ends_with("prompts/system/test.md"));
+    }
+
+    #[test]
+    fn test_file_path_with_multiple_dirs() {
+        let tmp_dir1 = tempdir().unwrap();
+        let tmp_dir2 = tempdir().unwrap();
+        let custom_dir1 = tmp_dir1.path().to_str().unwrap();
+        let custom_dir2 = tmp_dir2.path().to_str().unwrap();
+        fs::write(tmp_dir1.path().join("test_template.txt"), "Hello from dir1").unwrap();
+        fs::write(tmp_dir2.path().join("test_template.txt"), "Hello from dir2").unwrap();
+
+        let env = PromptEnvironment::from_directories(vec![custom_dir1, custom_dir2]);
+        let prompt = Prompt::new_with_env("test_template", env).with_extension("txt");
+        let path = prompt.file_path();
+        // Should return from the last dir (highest priority)
+        assert_eq!(path, PathBuf::from(custom_dir2).join("test_template.txt"));
     }
 
     #[test]
     fn test_file_path_with_custom_prompt_dir() {
         let tmp_dir = tempdir().unwrap();
         let custom_dir = tmp_dir.path().to_str().unwrap();
-        unsafe {
-            env::set_var("PROMPT_DIR", custom_dir);
-        }
-        let prompt = Prompt::new("user/test");
+        let env = PromptEnvironment::from_directory(custom_dir);
+        let prompt = Prompt::new_with_env("user/test", env);
         let path = prompt.file_path();
         assert_eq!(path, PathBuf::from(custom_dir).join("user/test.prompt"));
-        unsafe {
-            env::remove_var("PROMPT_DIR");
-        }
     }
 
     #[test]
@@ -256,7 +331,7 @@ mod tests {
         let template_path = custom_dir.join("test_template.txt");
         fs::write(&template_path, "Hello, {{ name }}!").unwrap();
 
-        let env = PromptEnvironment::from_directory(custom_dir.to_str().unwrap());
+        let env = PromptEnvironment::from_directories(vec![custom_dir.to_str().unwrap()]);
         let prompt = Prompt::new_with_env("test_template", env)
             .with_extension("txt")
             .with("name", "World");
@@ -267,12 +342,39 @@ mod tests {
 
     #[test]
     fn test_base_prompt_default() {
-        let prompt = Prompt::new("system/base");
+        let env = PromptEnvironment::from_directories(vec!["examples/prompts"]);
+        let prompt = Prompt::new_with_env("system/base", env);
         let result = prompt.generate();
 
         assert_eq!(
             "You are a helpful AI assistant. Your role is to assist the user.\n",
             result
         )
+    }
+
+    #[test]
+    fn test_multiple_dirs_with_override() {
+        let tmp_dir1 = tempdir().unwrap();
+        let tmp_dir2 = tempdir().unwrap();
+        let custom_dir1 = tmp_dir1.path().to_str().unwrap();
+        let custom_dir2 = tmp_dir2.path().to_str().unwrap();
+        fs::write(
+            tmp_dir1.path().join("override_test.txt"),
+            "Original: {{ name }}",
+        )
+        .unwrap();
+        fs::write(
+            tmp_dir2.path().join("override_test.txt"),
+            "Override: {{ name }}",
+        )
+        .unwrap();
+
+        let env = PromptEnvironment::from_directories(vec![custom_dir1, custom_dir2]);
+        let prompt = Prompt::new_with_env("override_test", env)
+            .with_extension("txt")
+            .with("name", "World");
+
+        let generated_string = prompt.generate();
+        assert_eq!(generated_string, "Override: World");
     }
 }

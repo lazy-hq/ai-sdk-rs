@@ -5,15 +5,26 @@
 //! underlying implementation details of different AI providers, offering a
 //! unified interface for various operations like text generation or streaming.
 
-use crate::core::Message;
-use crate::core::utils::resolve_message;
+use crate::core::tools::{Tool, ToolList};
+use crate::core::utils::{handle_tool_call, resolve_message};
+use crate::core::{Message, ToolCallInfo, ToolOutputInfo};
 use crate::error::{Error, Result};
 use async_trait::async_trait;
 use derive_builder::Builder;
 use futures::Stream;
+use futures::StreamExt;
+use schemars::{JsonSchema, Schema, schema_for};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::task::{Context, Poll};
+
+// ============================================================================
+// Section: constants
+// ============================================================================
+pub const DEFAULT_TOOL_STEP_COUNT: usize = 3;
 
 // ============================================================================
 // Section: traits
@@ -35,7 +46,10 @@ pub trait LanguageModel: Send + Sync + std::fmt::Debug {
     /// # Errors
     ///
     /// Returns an `Error` if the API call fails or the request is invalid.
-    async fn generate(&mut self, options: LanguageModelOptions) -> Result<LanguageModelResponse>;
+    async fn generate_text(
+        &mut self,
+        options: LanguageModelOptions,
+    ) -> Result<LanguageModelResponse>;
 
     /// Performs a streaming text generation request.
     ///
@@ -44,7 +58,7 @@ pub trait LanguageModel: Send + Sync + std::fmt::Debug {
     /// # Errors
     ///
     /// Returns an `Error` if the API call fails or the request is invalid.
-    async fn generate_stream(
+    async fn stream_text(
         &mut self,
         options: LanguageModelOptions,
     ) -> Result<LanguageModelStreamResponse>;
@@ -64,6 +78,9 @@ pub struct LanguageModelOptions {
     /// The messages to generate text from.
     /// At least User Message is required.
     pub messages: Vec<Message>,
+
+    /// Output format schema.
+    pub schema: Option<Schema>,
 
     /// The seed (integer) to use for random sampling. If set and supported
     /// by the model, calls will generate deterministic results.
@@ -95,9 +112,12 @@ pub struct LanguageModelOptions {
     /// Frequency penalty setting. It affects the likelihood of the model
     /// to repeatedly use the same words or phrases.
     pub frequency_penalty: Option<f32>,
-    // TODO: add support for reponse format
-    // pub response_format: Option<ResponseFormat>,
 
+    /// Number tool call cycles to make
+    pub step_count: Option<usize>,
+
+    /// List of tools to use.
+    pub tools: Option<ToolList>,
     // Additional provider-specific options. They are passed through
     // to the provider from the AI SDK and enable provider-specific functionality.
     //TODO: add support for provider options
@@ -110,12 +130,24 @@ impl LanguageModelOptions {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum LanguageModelResponseContentType {
+    Text(String),
+    ToolCall(ToolCallInfo),
+}
+
+impl LanguageModelResponseContentType {
+    pub fn new(text: impl Into<String>) -> Self {
+        Self::Text(text.into())
+    }
+}
+
 // TODO: constract a standard response type
 /// Response from a language model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LanguageModelResponse {
     /// The generated text.
-    pub text: String,
+    pub content: LanguageModelResponseContentType,
 
     /// The model that generated the response.
     pub model: Option<String>,
@@ -128,32 +160,71 @@ impl LanguageModelResponse {
     /// Creates a new response with the generated text.
     pub fn new(text: impl Into<String>) -> Self {
         Self {
-            text: text.into(),
+            content: LanguageModelResponseContentType::new(text.into()),
             model: None,
             stop_reason: None,
         }
     }
 }
 
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+pub enum LanguageModelStreamChunkType {
+    /// The model has started generating text.
+    #[default]
+    Start,
+    /// Text chunk
+    Text(String),
+    /// Tool call argument chunk
+    ToolCall(ToolCallInfo),
+    /// The model has stopped generating text.
+    End,
+    /// The model has failed to generate text.
+    Failed(String),
+    /// The model finsished generating text with incomplete response.
+    Incomplete(String),
+    /// Return this for unimplemented features for a specific model.
+    NotImplemented(String),
+}
+
 /// A response from a streaming language model.
 pub struct LanguageModelStreamResponse {
     /// A stream of responses from the language model.
-    pub stream: StreamChunk,
+    pub stream: LanguageModelStream,
 
     /// The model that generated the response.
     pub model: Option<String>,
-}
-
-/// Stream of responses from mapped to a common interface.
-pub type StreamChunk = Pin<Box<dyn Stream<Item = Result<StreamChunkData>> + Send>>;
-
-/// Chunked response from a language model.
-pub struct StreamChunkData {
-    /// The generated text.
-    pub text: String,
 
     /// The reason the model stopped generating text.
     pub stop_reason: Option<String>,
+}
+
+/// Stream of responses from mapped to a common interface.
+pub type LanguageModelStream =
+    Pin<Box<dyn Stream<Item = Result<LanguageModelStreamChunkType>> + Send>>;
+
+// Struct wrapper for MPMC channel to act as a stream
+pub struct MpmcStream {
+    receiver: Receiver<LanguageModelStreamChunkType>,
+}
+
+impl MpmcStream {
+    // Creates a new MpmcStream with an associated Sender
+    pub fn new() -> (Sender<LanguageModelStreamChunkType>, MpmcStream) {
+        let (tx, rx) = mpsc::channel();
+        (tx, MpmcStream { receiver: rx })
+    }
+}
+
+impl Stream for MpmcStream {
+    type Item = LanguageModelStreamChunkType;
+
+    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.receiver.try_recv() {
+            Ok(item) => Poll::Ready(Some(item)),
+            Err(mpsc::TryRecvError::Empty) => Poll::Pending,
+            Err(mpsc::TryRecvError::Disconnected) => Poll::Ready(None),
+        }
+    }
 }
 
 /// Options for text generation requests such as `generate_text` and `stream_text`.
@@ -318,6 +389,10 @@ impl<M: LanguageModel> LanguageModelRequestBuilder<M, ConversationStage> {
 
 /// OptionsStage Builder
 impl<M: LanguageModel> LanguageModelRequestBuilder<M, OptionsStage> {
+    pub fn schema<T: JsonSchema>(mut self) -> Self {
+        self.schema = Some(schema_for!(T));
+        self
+    }
     pub fn seed(mut self, seed: impl Into<u32>) -> Self {
         self.seed = Some(seed.into());
         self
@@ -353,6 +428,16 @@ impl<M: LanguageModel> LanguageModelRequestBuilder<M, OptionsStage> {
         self
     }
 
+    pub fn with_tool(mut self, tool: Tool) -> Self {
+        self.tools.get_or_insert_default().add_tool(tool);
+        self
+    }
+
+    pub fn step_count(mut self, step_count: usize) -> Self {
+        self.step_count = Some(step_count);
+        self
+    }
+
     pub fn build(self) -> LanguageModelRequest<M> {
         let model = self
             .model
@@ -376,16 +461,26 @@ impl<M: LanguageModel> LanguageModelRequestBuilder<M, OptionsStage> {
 pub struct GenerateTextResponse {
     /// The generated text.
     pub text: String,
+    pub steps: Option<Vec<ToolOutputInfo>>,
 }
 
-//TODO: add standard response fields
-/// Response from a stream call on `StreamText`.
+impl GenerateTextResponse {
+    pub fn into_schema<T: DeserializeOwned>(&self) -> std::result::Result<T, serde_json::Error> {
+        serde_json::from_str(&self.text)
+    }
+}
+
+// TODO: add standard response fields
+// Response from a stream call on `StreamText`.
 pub struct StreamTextResponse {
     /// A stream of responses from the language model.
-    pub stream: StreamChunk,
+    pub stream: MpmcStream,
 
     /// The model that generated the response.
     pub model: Option<String>,
+
+    /// Tool output from each tool call.
+    pub steps: Option<Vec<ToolOutputInfo>>,
 }
 
 // ============================================================================
@@ -403,18 +498,41 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
         let (system_prompt, messages) =
             resolve_message(&self.options.system, &self.prompt, &self.options.messages);
 
-        let options = LanguageModelOptions {
+        let mut options = LanguageModelOptions {
             system: Some(system_prompt),
             messages,
+            schema: self.options.schema.to_owned(),
             stop_sequences: self.options.stop_sequences.to_owned(),
+            tools: self.options.tools.to_owned(),
             ..self.options
         };
 
-        let response = self.model.generate(options).await?;
+        let response = self.model.generate_text(options.clone()).await?;
 
-        let result = GenerateTextResponse {
-            text: response.text,
+        let mut steps: Option<Vec<ToolOutputInfo>> = None;
+        let text = match response.content {
+            LanguageModelResponseContentType::Text(text) => text,
+            LanguageModelResponseContentType::ToolCall(tool_info) => {
+                let mut new_steps = Vec::new();
+                handle_tool_call(&mut options, vec![tool_info], &mut new_steps).await;
+
+                // update anything that might change in `handle_tool_call`
+                self.messages = options.messages.clone();
+                self.tools = options.tools;
+                self.step_count = options.step_count;
+
+                // call the next step
+                let result = Box::pin(self.generate_text()).await?;
+
+                // update steps
+                new_steps.extend(result.steps.unwrap_or_default());
+                steps = Some(new_steps);
+
+                result.text
+            }
         };
+
+        let result = GenerateTextResponse { text, steps };
 
         Ok(result)
     }
@@ -429,18 +547,67 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
         let (system_prompt, messages) =
             resolve_message(&self.options.system, &self.prompt, &self.options.messages);
 
-        let options = LanguageModelOptions {
+        let mut options = LanguageModelOptions {
             system: Some(system_prompt),
             messages,
+            schema: self.options.schema.to_owned(),
             stop_sequences: self.options.stop_sequences.to_owned(),
+            tools: self.options.tools.to_owned(),
             ..self.options
         };
 
-        let response = self.model.generate_stream(options).await?;
+        let mut response = self.model.stream_text(options.to_owned()).await?;
+
+        let mut steps: Option<Vec<ToolOutputInfo>> = None;
+        let (tx, stream) = MpmcStream::new();
+        while let Some(chunk) = response.stream.next().await {
+            match chunk {
+                Ok(LanguageModelStreamChunkType::ToolCall(tool_info)) => {
+                    let mut cur_steps = Vec::new();
+                    handle_tool_call(&mut options, vec![tool_info], &mut cur_steps).await;
+
+                    // update anything that might change in `handle_tool_call`
+                    self.messages = options.messages.clone();
+                    self.tools = options.tools.clone();
+                    self.step_count = options.step_count;
+
+                    // call the next step
+                    let next_res = Box::pin(self.stream_text()).await;
+
+                    match next_res {
+                        Ok(StreamTextResponse {
+                            mut stream,
+                            steps: next_steps,
+                            ..
+                        }) => {
+                            // update steps
+                            cur_steps.extend(next_steps.unwrap_or_default());
+                            steps = Some(cur_steps);
+
+                            while let Some(chunk) = stream.next().await {
+                                let _ = tx.send(chunk);
+                            }
+                        }
+                        Err(e) => {
+                            let _ = tx.send(LanguageModelStreamChunkType::Failed(e.to_string()));
+                        }
+                    };
+                }
+                Ok(other) => {
+                    let _ = tx.send(other); // propagate
+                }
+                Err(e) => {
+                    let _ = tx.send(LanguageModelStreamChunkType::Failed(e.to_string()));
+                }
+            }
+        }
+
+        drop(tx);
 
         let result = StreamTextResponse {
-            stream: Box::pin(response.stream),
+            stream,
             model: response.model,
+            steps,
         };
 
         Ok(result)

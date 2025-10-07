@@ -34,6 +34,9 @@ pub enum Error {
     #[error("Invalid input: {0}")]
     InvalidInput(String),
 
+    #[error("Tool error: {0}")]
+    ToolCallError(String),
+
     /// A catch-all for other miscellaneous errors.
     #[error("AI SDK error: {0}")]
     Other(String),
@@ -49,5 +52,19 @@ pub enum Error {
 impl From<UninitializedFieldError> for Error {
     fn from(err: UninitializedFieldError) -> Self {
         Error::MissingField(err.field_name().to_string())
+    }
+}
+
+impl From<Error> for String {
+    fn from(value: Error) -> String {
+        match value {
+            Error::MissingField(error) => format!("Missing field: {error}"),
+            Error::ApiError(error) => format!("API error: {error}"),
+            Error::InvalidInput(error) => format!("Invalid input: {error}"),
+            Error::ToolCallError(error) => format!("Tool error: {error}"),
+            Error::Other(error) => format!("Other error: {error}"),
+            #[cfg(feature = "openai")]
+            Error::OpenAIError(error) => format!("OpenAI error: {error}"),
+        }
     }
 }
