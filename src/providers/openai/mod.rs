@@ -166,7 +166,7 @@ impl LanguageModel for OpenAI {
                                         }
                                         other => {
                                             return futures::future::ready(Some(Ok(
-                                                LanguageModelStreamChunkType::NotImplemented(
+                                                LanguageModelStreamChunkType::NotSupported(
                                                     format!("Unhandled output: {other:?}"),
                                                 ),
                                             )));
@@ -183,17 +183,25 @@ impl LanguageModel for OpenAI {
                     Ok(ResponseEvent::ResponseOutputTextDelta(d)) => {
                         Some(Ok(LanguageModelStreamChunkType::Text(d.delta)))
                     }
-                    Ok(ResponseEvent::ResponseFailed(f)) => {
+                    Ok(ResponseEvent::ResponseFunctionCallArgumentsDelta(d)) => {
+                        Some(Ok(LanguageModelStreamChunkType::ToolCall(d.delta)))
+                    }
+                    Ok(ResponseEvent::ResponseIncomplete(d)) => {
+                        Some(Ok(LanguageModelStreamChunkType::Incomplete({
+                            if let Some(reason) = d.response.incomplete_details {
+                                reason.reason
+                            } else {
+                                "unknown reason".to_string()
+                            }
+                        })))
+                    }
+                    Ok(ResponseEvent::ResponseError(e)) => {
                         state.completed = true;
-                        let reason = f
-                            .response
-                            .error
-                            .as_ref()
-                            .map(|e| format!("{}: {}", e.code, e.message))
-                            .unwrap_or_else(|| "unknown failure".to_string());
+                        let reason =
+                            format!("{}: {}", e.code.unwrap_or(" - ".to_string()), e.message);
                         Some(Ok(LanguageModelStreamChunkType::Failed(reason)))
                     }
-                    Ok(resp) => Some(Ok(LanguageModelStreamChunkType::NotImplemented(format!(
+                    Ok(resp) => Some(Ok(LanguageModelStreamChunkType::NotSupported(format!(
                         "{resp:?}"
                     )))),
                     Err(e) => {
@@ -207,7 +215,6 @@ impl LanguageModel for OpenAI {
         Ok(LanguageModelStreamResponse {
             stream: Box::pin(stream),
             model,
-            stop_reason: None,
         })
     }
 }

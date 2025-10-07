@@ -176,6 +176,8 @@ pub struct LanguageModelResponse {
     pub model: Option<String>,
 
     /// The reason the model stopped generating text.
+    /// Might not necessaryly be an error. for errors, handle
+    /// the `Result::Err` variant associated with this type.
     pub stop_reason: Option<String>,
 
     /// Usage information
@@ -206,11 +208,11 @@ pub enum LanguageModelStreamChunkType {
     /// The model has stopped generating text successfully.
     End(AssistantMessage),
     /// The model has failed to generate text.
-    Failed(String),
+    Failed(String), // TODO: add a type to accomodate provider and aisdk errors
     /// The model finsished generating text with incomplete response.
-    Incomplete(String),
+    Incomplete(String), // TODO: replace with StopReason
     /// Return this for unimplemented features for a specific model.
-    NotImplemented(String),
+    NotSupported(String),
 }
 
 /// Stream of responses from mapped to a common interface.
@@ -223,8 +225,6 @@ pub struct LanguageModelStreamResponse {
     pub stream: LanguageModelStream,
     /// The model that generated the response.
     pub model: Option<String>,
-    /// The reason the model stopped generating text.
-    pub stop_reason: Option<String>,
 }
 
 // Struct wrapper for MPMC channel to act as a stream
@@ -483,10 +483,18 @@ impl<M: LanguageModel> LanguageModelRequestBuilder<M, OptionsStage> {
 /// Response from a generate call on `GenerateText`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerateTextResponse {
-    /// The options that generated the latest response
+    /// The options that generated this response
     options: LanguageModelOptions,
     /// The model that generated the response.
     model: Option<String>,
+
+    /// The reason the model stopped generating text.
+    /// Might not necessaryly be an error. for errors, handle
+    /// the `Result::Err` variant associated with this type.
+    pub stop_reason: Option<String>,
+
+    /// Usage information of the last call
+    pub usage: Option<Usage>, // TODO: change to a function for total usage
 }
 
 impl GenerateTextResponse {
@@ -498,7 +506,8 @@ impl GenerateTextResponse {
         }
     }
 
-    // The last content of the response
+    // TODO: incomplete code
+    /// The last content of the response
     pub fn content(&self) -> Option<&LanguageModelResponseContentType> {
         match self.options.messages.last() {
             Some(Message::Assistant(content)) => Some(&content.content),
@@ -506,8 +515,9 @@ impl GenerateTextResponse {
         }
     }
 
-    // The last text content of the response. returns None if the last
-    // returned content is not a text.
+    // TODO: incomplete code
+    /// The last text content of the response. returns None if the last
+    /// returned content is not a text.
     pub fn text(&self) -> Option<&String> {
         match self.options.messages.last() {
             Some(Message::Assistant(AssistantMessage {
@@ -565,12 +575,14 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
             LanguageModelResponseContentType::Text(text) => {
                 let assistant_msg = Message::Assistant(AssistantMessage {
                     content: text.into(),
-                    usage: response.usage,
+                    usage: response.usage.clone(),
                 });
                 options.messages.push(assistant_msg);
                 Ok(GenerateTextResponse {
                     options,
                     model: response.model,
+                    stop_reason: response.stop_reason,
+                    usage: response.usage,
                 })
             }
             LanguageModelResponseContentType::ToolCall(tool_info) => {
