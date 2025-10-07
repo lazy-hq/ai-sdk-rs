@@ -4,8 +4,7 @@
 pub mod conversions;
 pub mod settings;
 use async_openai::types::responses::{
-    Content, CreateResponse, OutputContent, OutputItem, Response, ResponseEvent,
-    ResponseOutputItemDone, ResponseStream,
+    Content, CreateResponse, OutputContent, OutputItem, Response, ResponseEvent, ResponseStream,
 };
 use async_openai::{Client, config::OpenAIConfig};
 use futures::{StreamExt, stream::once};
@@ -14,6 +13,7 @@ use crate::core::language_model::{
     LanguageModelOptions, LanguageModelResponse, LanguageModelResponseContentType,
     LanguageModelStreamChunkType, LanguageModelStreamResponse,
 };
+use crate::core::messages::AssistantMessage;
 use crate::providers::openai::settings::{OpenAIProviderSettings, OpenAIProviderSettingsBuilder};
 use crate::{
     core::{language_model::LanguageModel, provider::Provider, tools::ToolCallInfo},
@@ -83,8 +83,9 @@ impl LanguageModel for OpenAI {
 
         Ok(LanguageModelResponse {
             model: Some(response.model.to_string()),
-            content: collected.first().unwrap().clone(),
+            content: collected.first().unwrap().clone(), // handle multiple outputs
             stop_reason: None,
+            usage: response.usage.map(|usage| usage.into()),
         })
     }
 
@@ -132,15 +133,55 @@ impl LanguageModel for OpenAI {
                 };
 
                 futures::future::ready(match evt_res {
+                    Ok(ResponseEvent::ResponseCompleted(d)) => {
+                        state.completed = true;
+                        Some(Ok(LanguageModelStreamChunkType::End(AssistantMessage {
+                            content: {
+                                let mut collected: Vec<LanguageModelResponseContentType> =
+                                    Vec::new();
+
+                                for out in d.response.output.unwrap_or_default() {
+                                    match out {
+                                        OutputItem::Message(msg) => {
+                                            for c in msg.content {
+                                                if let Content::OutputText(t) = c {
+                                                    collected.push(
+                                                        LanguageModelResponseContentType::new(
+                                                            t.text,
+                                                        ),
+                                                    );
+                                                }
+                                            }
+                                        }
+                                        OutputItem::FunctionCall(f) => {
+                                            let mut tool_info = ToolCallInfo::new(f.name);
+                                            tool_info.id(f.call_id);
+                                            tool_info
+                                                .input(serde_json::from_str(&f.arguments).unwrap());
+                                            collected.push(
+                                                LanguageModelResponseContentType::ToolCall(
+                                                    tool_info,
+                                                ),
+                                            );
+                                        }
+                                        other => {
+                                            return futures::future::ready(Some(Ok(
+                                                LanguageModelStreamChunkType::NotImplemented(
+                                                    format!("Unhandled output: {other:?}"),
+                                                ),
+                                            )));
+                                        }
+                                    };
+                                }
+
+                                // TODO: handle multiple outputs
+                                collected.first().unwrap().clone()
+                            },
+                            usage: d.response.usage.map(|usage| usage.into()),
+                        })))
+                    }
                     Ok(ResponseEvent::ResponseOutputTextDelta(d)) => {
                         Some(Ok(LanguageModelStreamChunkType::Text(d.delta)))
-                    }
-                    Ok(ResponseEvent::ResponseOutputTextDone(d)) => {
-                        Some(Ok(LanguageModelStreamChunkType::TextDone(d.text)))
-                    }
-                    Ok(ResponseEvent::ResponseCompleted(_)) => {
-                        state.completed = true;
-                        Some(Ok(LanguageModelStreamChunkType::End))
                     }
                     Ok(ResponseEvent::ResponseFailed(f)) => {
                         state.completed = true;
@@ -151,17 +192,6 @@ impl LanguageModel for OpenAI {
                             .map(|e| format!("{}: {}", e.code, e.message))
                             .unwrap_or_else(|| "unknown failure".to_string());
                         Some(Ok(LanguageModelStreamChunkType::Failed(reason)))
-                    }
-                    Ok(ResponseEvent::ResponseOutputItemDone(ResponseOutputItemDone {
-                        item: OutputItem::FunctionCall(tool_call),
-                        ..
-                    })) => {
-                        state.completed = true;
-                        let mut tool_info = ToolCallInfo::new(tool_call.name);
-                        tool_info.id(tool_call.call_id);
-                        tool_info.input(serde_json::from_str(&tool_call.arguments).unwrap());
-
-                        Some(Ok(LanguageModelStreamChunkType::ToolCallDone(tool_info)))
                     }
                     Ok(resp) => Some(Ok(LanguageModelStreamChunkType::NotImplemented(format!(
                         "{resp:?}"

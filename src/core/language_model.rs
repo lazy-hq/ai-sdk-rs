@@ -201,14 +201,10 @@ pub enum LanguageModelStreamChunkType {
     Start,
     /// Text chunk
     Text(String),
-    /// Text done
-    TextDone(String),
     /// Tool call argument chunk
     ToolCall(String),
-    /// Tool call done
-    ToolCallDone(ToolCallInfo),
     /// The model has stopped generating text successfully.
-    End,
+    End(AssistantMessage),
     /// The model has failed to generate text.
     Failed(String),
     /// The model finsished generating text with incomplete response.
@@ -510,6 +506,8 @@ impl GenerateTextResponse {
         }
     }
 
+    // The last text content of the response. returns None if the last
+    // returned content is not a text.
     pub fn text(&self) -> Option<&String> {
         match self.options.messages.last() {
             Some(Message::Assistant(AssistantMessage {
@@ -565,13 +563,25 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
 
         match response.content {
             LanguageModelResponseContentType::Text(text) => {
-                options.messages.push(Message::Assistant(text.into()));
+                let assistant_msg = Message::Assistant(AssistantMessage {
+                    content: text.into(),
+                    usage: response.usage,
+                });
+                options.messages.push(assistant_msg);
                 Ok(GenerateTextResponse {
                     options,
                     model: response.model,
                 })
             }
             LanguageModelResponseContentType::ToolCall(tool_info) => {
+                // add tool message
+                let _ = &options
+                    .messages
+                    .push(Message::Assistant(AssistantMessage::new(
+                        LanguageModelResponseContentType::ToolCall(tool_info.clone()),
+                        response.usage,
+                    )));
+
                 let mut tool_steps = Vec::new();
                 handle_tool_call(&mut options, vec![tool_info], &mut tool_steps).await;
 
@@ -608,47 +618,64 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
         let _ = tx.send(LanguageModelStreamChunkType::Start);
         while let Some(chunk) = response.stream.next().await {
             match chunk {
-                Ok(LanguageModelStreamChunkType::ToolCallDone(tool_info)) => {
-                    let mut current_tool_steps = Vec::new();
-                    handle_tool_call(
-                        &mut options,
-                        vec![tool_info.clone()],
-                        &mut current_tool_steps,
-                    )
-                    .await;
-
-                    // update anything that might change in `handle_tool_call`
-                    // self.messages = options.messages.clone();
-                    // self.tools = options.tools.clone();
-                    // self.step_count = options.step_count;
-                    self.options = options.clone();
-
-                    // call the next step
-                    let next_res = Box::pin(self.stream_text()).await;
-
-                    let _ = tx.send(LanguageModelStreamChunkType::ToolCallDone(tool_info));
-                    match next_res {
-                        Ok(StreamTextResponse { mut stream, .. }) => {
-                            while let Some(chunk) = stream.next().await {
-                                let _ = tx.send(chunk);
-                            }
+                Ok(LanguageModelStreamChunkType::End(assistant_msg)) => {
+                    let usage = assistant_msg.usage.clone();
+                    match &assistant_msg.content {
+                        LanguageModelResponseContentType::Text(text) => {
+                            let assistant_msg = Message::Assistant(AssistantMessage {
+                                content: text.clone().into(),
+                                usage: assistant_msg.usage.clone(),
+                            });
+                            options.messages.push(assistant_msg);
                         }
-                        Err(e) => {
-                            let _ = tx.send(LanguageModelStreamChunkType::Failed(e.to_string()));
+                        LanguageModelResponseContentType::ToolCall(tool_info) => {
+                            // add tool message
+                            let _ =
+                                &options
+                                    .messages
+                                    .push(Message::Assistant(AssistantMessage::new(
+                                        LanguageModelResponseContentType::ToolCall(
+                                            tool_info.clone(),
+                                        ),
+                                        usage.clone(),
+                                    )));
+
+                            let mut current_tool_steps = Vec::new();
+                            handle_tool_call(
+                                &mut options,
+                                vec![tool_info.clone()],
+                                &mut current_tool_steps,
+                            )
+                            .await;
+
+                            self.options = options.clone();
+
+                            // call the next step
+                            let next_res = Box::pin(self.stream_text()).await;
+
+                            match next_res {
+                                Ok(StreamTextResponse { mut stream, .. }) => {
+                                    while let Some(chunk) = stream.next().await {
+                                        let _ = tx.send(chunk);
+                                    }
+                                }
+                                Err(e) => {
+                                    // TODO: is this the right error to return. maybe Incomplete is
+                                    // correct
+                                    let _ = tx
+                                        .send(LanguageModelStreamChunkType::Failed(e.to_string()));
+                                    break;
+                                }
+                            };
                         }
                     };
-                }
-                Ok(LanguageModelStreamChunkType::TextDone(text)) => {
-                    self.options
-                        .messages
-                        .push(Message::Assistant(text.clone().into()));
-                    let _ = tx.send(LanguageModelStreamChunkType::TextDone(text));
                 }
                 Ok(other) => {
                     let _ = tx.send(other); // propagate
                 }
                 Err(e) => {
                     let _ = tx.send(LanguageModelStreamChunkType::Failed(e.to_string()));
+                    break;
                 }
             }
         }
