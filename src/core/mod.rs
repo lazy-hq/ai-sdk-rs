@@ -17,7 +17,8 @@ pub use aisdk_macros::tool;
 
 // Re-export key components to provide a clean public API.
 pub use language_model::{
-    GenerateTextResponse, LanguageModelRequest, LanguageModelStreamChunkType, StreamTextResponse,
+    GenerateTextResponse, LanguageModel, LanguageModelRequest, LanguageModelStreamChunkType,
+    StreamTextResponse,
 };
 pub use messages::{AssistantMessage, Message, Role, SystemMessage, UserMessage};
 pub use provider::Provider;
