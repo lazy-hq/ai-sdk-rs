@@ -133,11 +133,13 @@ impl From<Message> for InputItem {
 impl From<OpenAIUsage> for Usage {
     fn from(value: OpenAIUsage) -> Self {
         Self {
-            input_tokens: Some(value.input_tokens),
-            output_tokens: Some(value.output_tokens),
-            total_tokens: Some(value.total_tokens),
-            cached_tokens: Some(value.input_tokens_details.cached_tokens.unwrap_or(0)),
-            reasoning_tokens: Some(value.output_tokens_details.reasoning_tokens.unwrap_or(0)),
+            input_tokens: Some(value.input_tokens as usize),
+            output_tokens: Some(value.output_tokens as usize),
+            total_tokens: Some(value.total_tokens as usize),
+            cached_tokens: Some(value.input_tokens_details.cached_tokens.unwrap_or(0) as usize),
+            reasoning_tokens: Some(
+                value.output_tokens_details.reasoning_tokens.unwrap_or(0) as usize
+            ),
         }
     }
 }

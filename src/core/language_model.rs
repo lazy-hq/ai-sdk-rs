@@ -7,6 +7,7 @@
 
 use crate::core::messages::{AssistantMessage, TaggedMessage};
 use crate::core::tools::{Tool, ToolList};
+use crate::core::utils;
 use crate::core::utils::{handle_tool_call, resolve_message};
 use crate::core::{Message, ToolCallInfo, ToolOutputInfo};
 use crate::error::{Error, Result};
@@ -18,6 +19,8 @@ use schemars::{JsonSchema, Schema, schema_for};
 use serde::de::DeserializeOwned;
 use serde::ser::Error as SerdeError;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::ops::Add;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -69,6 +72,29 @@ pub trait LanguageModel: Send + Sync + std::fmt::Debug {
 // ============================================================================
 // Section: structs and builders
 // ============================================================================
+
+/// A "step" represents a single cycle of model interaction.
+pub struct Step {
+    pub step_id: usize,
+    pub messages: Vec<Message>,
+}
+
+impl Step {
+    pub fn new(step_id: usize, messages: Vec<Message>) -> Self {
+        Self { step_id, messages }
+    }
+
+    // total usage of a step
+    pub fn usage(&self) -> Usage {
+        self.messages
+            .iter()
+            .filter_map(|m| match m {
+                Message::Assistant(AssistantMessage { usage, .. }) => usage.as_ref(),
+                _ => None,
+            })
+            .fold(Usage::default(), |acc, u| &acc + u)
+    }
+}
 
 /// Options for a language model request.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, Builder)]
@@ -163,13 +189,27 @@ impl LanguageModelResponseContentType {
     }
 }
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Usage {
-    pub input_tokens: Option<u32>,
-    pub output_tokens: Option<u32>,
-    pub total_tokens: Option<u32>,
-    pub reasoning_tokens: Option<u32>,
-    pub cached_tokens: Option<u32>,
+    pub input_tokens: Option<usize>,
+    pub output_tokens: Option<usize>,
+    pub total_tokens: Option<usize>,
+    pub reasoning_tokens: Option<usize>,
+    pub cached_tokens: Option<usize>,
+}
+
+impl Add for &Usage {
+    type Output = Usage;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Usage {
+            input_tokens: utils::sum_options(self.input_tokens, rhs.input_tokens),
+            output_tokens: utils::sum_options(self.output_tokens, rhs.output_tokens),
+            total_tokens: utils::sum_options(self.total_tokens, rhs.total_tokens),
+            reasoning_tokens: utils::sum_options(self.reasoning_tokens, rhs.reasoning_tokens),
+            cached_tokens: utils::sum_options(self.cached_tokens, rhs.cached_tokens),
+        }
+    }
 }
 
 // TODO: constract a standard response type
@@ -518,6 +558,53 @@ impl GenerateTextResponse {
         self.options.messages.iter().map(|t| t.step_id).collect()
     }
 
+    // A specific step
+    pub fn step(&self, index: usize) -> Option<Step> {
+        let messages: Vec<Message> = self
+            .options
+            .messages
+            .iter()
+            .filter(|t| t.step_id == index)
+            .map(|t| t.message.clone())
+            .collect();
+        if messages.is_empty() {
+            None
+        } else {
+            Some(Step::new(index, messages))
+        }
+    }
+
+    // The final step
+    pub fn final_step(&self) -> Option<Step> {
+        let max_step = self.options.messages.iter().map(|t| t.step_id).max()?;
+        self.step(max_step)
+    }
+
+    // All the steps
+    pub fn steps(&self) -> Vec<Step> {
+        let mut step_map: HashMap<usize, Vec<Message>> = HashMap::new();
+        for tagged in &self.options.messages {
+            step_map
+                .entry(tagged.step_id)
+                .or_default()
+                .push(tagged.message.clone());
+        }
+        let mut steps: Vec<Step> = step_map
+            .into_iter()
+            .map(|(id, msgs)| Step::new(id, msgs))
+            .collect();
+        steps.sort_by_key(|s| s.step_id);
+        steps
+    }
+
+    // Total usage
+    pub fn usage(&self) -> Usage {
+        self.steps()
+            .iter()
+            .map(|s| s.usage())
+            .fold(Usage::default(), |acc, u| &acc + &u)
+    }
+
     // TODO: incomplete code
     /// The last content of the response
     pub fn content(&self) -> Option<&LanguageModelResponseContentType> {
@@ -737,5 +824,338 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
         };
 
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_usage_add_both_some() {
+        let u1 = Usage {
+            input_tokens: Some(10),
+            output_tokens: Some(20),
+            total_tokens: Some(30),
+            reasoning_tokens: Some(5),
+            cached_tokens: Some(2),
+        };
+        let u2 = Usage {
+            input_tokens: Some(15),
+            output_tokens: Some(25),
+            total_tokens: Some(40),
+            reasoning_tokens: Some(10),
+            cached_tokens: Some(3),
+        };
+        let result = &u1 + &u2;
+        assert_eq!(result.input_tokens, Some(25));
+        assert_eq!(result.output_tokens, Some(45));
+        assert_eq!(result.total_tokens, Some(70));
+        assert_eq!(result.reasoning_tokens, Some(15));
+        assert_eq!(result.cached_tokens, Some(5));
+    }
+
+    #[test]
+    fn test_usage_add_first_some_second_none() {
+        let u1 = Usage {
+            input_tokens: Some(10),
+            output_tokens: Some(20),
+            total_tokens: Some(30),
+            reasoning_tokens: Some(5),
+            cached_tokens: Some(2),
+        };
+        let u2 = Usage {
+            input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+            reasoning_tokens: None,
+            cached_tokens: None,
+        };
+        let result = &u1 + &u2;
+        assert_eq!(result.input_tokens, Some(10));
+        assert_eq!(result.output_tokens, Some(20));
+        assert_eq!(result.total_tokens, Some(30));
+        assert_eq!(result.reasoning_tokens, Some(5));
+        assert_eq!(result.cached_tokens, Some(2));
+    }
+
+    #[test]
+    fn test_usage_add_first_none_second_some() {
+        let u1 = Usage {
+            input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+            reasoning_tokens: None,
+            cached_tokens: None,
+        };
+        let u2 = Usage {
+            input_tokens: Some(15),
+            output_tokens: Some(25),
+            total_tokens: Some(40),
+            reasoning_tokens: Some(10),
+            cached_tokens: Some(3),
+        };
+        let result = &u1 + &u2;
+        assert_eq!(result.input_tokens, Some(15));
+        assert_eq!(result.output_tokens, Some(25));
+        assert_eq!(result.total_tokens, Some(40));
+        assert_eq!(result.reasoning_tokens, Some(10));
+        assert_eq!(result.cached_tokens, Some(3));
+    }
+
+    #[test]
+    fn test_usage_add_both_none() {
+        let u1 = Usage::default();
+        let u2 = Usage::default();
+        let result = &u1 + &u2;
+        assert_eq!(result.input_tokens, None);
+        assert_eq!(result.output_tokens, None);
+        assert_eq!(result.total_tokens, None);
+        assert_eq!(result.reasoning_tokens, None);
+        assert_eq!(result.cached_tokens, None);
+    }
+
+    #[test]
+    fn test_usage_add_mixed() {
+        let u1 = Usage {
+            input_tokens: Some(10),
+            output_tokens: None,
+            total_tokens: Some(30),
+            reasoning_tokens: None,
+            cached_tokens: Some(2),
+        };
+        let u2 = Usage {
+            input_tokens: None,
+            output_tokens: Some(25),
+            total_tokens: Some(40),
+            reasoning_tokens: Some(10),
+            cached_tokens: None,
+        };
+        let result = &u1 + &u2;
+        assert_eq!(result.input_tokens, Some(10));
+        assert_eq!(result.output_tokens, Some(25));
+        assert_eq!(result.total_tokens, Some(70));
+        assert_eq!(result.reasoning_tokens, Some(10));
+        assert_eq!(result.cached_tokens, Some(2));
+    }
+
+    #[test]
+    fn test_usage_add_zero_values() {
+        let u1 = Usage {
+            input_tokens: Some(0),
+            output_tokens: Some(0),
+            total_tokens: Some(0),
+            reasoning_tokens: Some(0),
+            cached_tokens: Some(0),
+        };
+        let u2 = Usage {
+            input_tokens: Some(0),
+            output_tokens: Some(0),
+            total_tokens: Some(0),
+            reasoning_tokens: Some(0),
+            cached_tokens: Some(0),
+        };
+        let result = &u1 + &u2;
+        assert_eq!(result.input_tokens, Some(0));
+        assert_eq!(result.output_tokens, Some(0));
+        assert_eq!(result.total_tokens, Some(0));
+        assert_eq!(result.reasoning_tokens, Some(0));
+        assert_eq!(result.cached_tokens, Some(0));
+    }
+
+    #[test]
+    fn test_step_usage() {
+        let messages = vec![
+            Message::Assistant(AssistantMessage {
+                content: LanguageModelResponseContentType::Text("Hello".to_string()),
+                usage: Some(Usage {
+                    input_tokens: Some(10),
+                    output_tokens: Some(5),
+                    total_tokens: Some(15),
+                    reasoning_tokens: Some(2),
+                    cached_tokens: Some(1),
+                }),
+            }),
+            Message::User("Hi".to_string().into()),
+            Message::Assistant(AssistantMessage {
+                content: LanguageModelResponseContentType::Text("How are you?".to_string()),
+                usage: Some(Usage {
+                    input_tokens: Some(5),
+                    output_tokens: Some(3),
+                    total_tokens: Some(8),
+                    reasoning_tokens: Some(1),
+                    cached_tokens: Some(0),
+                }),
+            }),
+        ];
+        let step = Step::new(1, messages);
+        let usage = step.usage();
+        assert_eq!(usage.input_tokens, Some(15));
+        assert_eq!(usage.output_tokens, Some(8));
+        assert_eq!(usage.total_tokens, Some(23));
+        assert_eq!(usage.reasoning_tokens, Some(3));
+        assert_eq!(usage.cached_tokens, Some(1));
+    }
+
+    #[test]
+    fn test_step_usage_no_assistant() {
+        let messages = vec![
+            Message::User("Hello".to_string().into()),
+            Message::System("System".to_string().into()),
+        ];
+        let step = Step::new(0, messages);
+        let usage = step.usage();
+        assert_eq!(usage, Usage::default());
+    }
+
+    #[test]
+    fn test_generate_text_response_step() {
+        let options = LanguageModelOptions {
+            messages: vec![
+                TaggedMessage::new(0, Message::System("System".to_string().into())),
+                TaggedMessage::new(0, Message::User("User".to_string().into())),
+                TaggedMessage::new(
+                    1,
+                    Message::Assistant(AssistantMessage {
+                        content: LanguageModelResponseContentType::Text("Assistant".to_string()),
+                        usage: None,
+                    }),
+                ),
+            ],
+            ..Default::default()
+        };
+        let response = GenerateTextResponse {
+            options,
+            model: None,
+            stop_reason: None,
+            usage: None,
+        };
+
+        let step0 = response.step(0).unwrap();
+        assert_eq!(step0.step_id, 0);
+        assert_eq!(step0.messages.len(), 2);
+
+        let step1 = response.step(1).unwrap();
+        assert_eq!(step1.step_id, 1);
+        assert_eq!(step1.messages.len(), 1);
+
+        assert!(response.step(2).is_none());
+    }
+
+    #[test]
+    fn test_generate_text_response_final_step() {
+        let options = LanguageModelOptions {
+            messages: vec![
+                TaggedMessage::new(0, Message::System("System".to_string().into())),
+                TaggedMessage::new(1, Message::User("User".to_string().into())),
+                TaggedMessage::new(
+                    2,
+                    Message::Assistant(AssistantMessage {
+                        content: LanguageModelResponseContentType::Text("Assistant".to_string()),
+                        usage: None,
+                    }),
+                ),
+            ],
+            ..Default::default()
+        };
+        let response = GenerateTextResponse {
+            options,
+            model: None,
+            stop_reason: None,
+            usage: None,
+        };
+
+        let final_step = response.final_step().unwrap();
+        assert_eq!(final_step.step_id, 2);
+        assert_eq!(final_step.messages.len(), 1);
+    }
+
+    #[test]
+    fn test_generate_text_response_steps() {
+        let options = LanguageModelOptions {
+            messages: vec![
+                TaggedMessage::new(0, Message::System("System".to_string().into())),
+                TaggedMessage::new(0, Message::User("User".to_string().into())),
+                TaggedMessage::new(
+                    1,
+                    Message::Assistant(AssistantMessage {
+                        content: LanguageModelResponseContentType::Text("Assistant1".to_string()),
+                        usage: None,
+                    }),
+                ),
+                TaggedMessage::new(
+                    2,
+                    Message::Assistant(AssistantMessage {
+                        content: LanguageModelResponseContentType::Text("Assistant2".to_string()),
+                        usage: None,
+                    }),
+                ),
+            ],
+            ..Default::default()
+        };
+        let response = GenerateTextResponse {
+            options,
+            model: None,
+            stop_reason: None,
+            usage: None,
+        };
+
+        let steps = response.steps();
+        assert_eq!(steps.len(), 3);
+        assert_eq!(steps[0].step_id, 0);
+        assert_eq!(steps[0].messages.len(), 2);
+        assert_eq!(steps[1].step_id, 1);
+        assert_eq!(steps[1].messages.len(), 1);
+        assert_eq!(steps[2].step_id, 2);
+        assert_eq!(steps[2].messages.len(), 1);
+    }
+
+    #[test]
+    fn test_generate_text_response_usage() {
+        let options = LanguageModelOptions {
+            messages: vec![
+                TaggedMessage::new(0, Message::System("System".to_string().into())),
+                TaggedMessage::new(
+                    1,
+                    Message::Assistant(AssistantMessage {
+                        content: LanguageModelResponseContentType::Text("Assistant1".to_string()),
+                        usage: Some(Usage {
+                            input_tokens: Some(10),
+                            output_tokens: Some(5),
+                            total_tokens: Some(15),
+                            reasoning_tokens: Some(2),
+                            cached_tokens: Some(1),
+                        }),
+                    }),
+                ),
+                TaggedMessage::new(
+                    2,
+                    Message::Assistant(AssistantMessage {
+                        content: LanguageModelResponseContentType::Text("Assistant2".to_string()),
+                        usage: Some(Usage {
+                            input_tokens: Some(5),
+                            output_tokens: Some(3),
+                            total_tokens: Some(8),
+                            reasoning_tokens: Some(1),
+                            cached_tokens: Some(0),
+                        }),
+                    }),
+                ),
+            ],
+            ..Default::default()
+        };
+        let response = GenerateTextResponse {
+            options,
+            model: None,
+            stop_reason: None,
+            usage: None,
+        };
+
+        let total_usage = response.usage();
+        assert_eq!(total_usage.input_tokens, Some(15));
+        assert_eq!(total_usage.output_tokens, Some(8));
+        assert_eq!(total_usage.total_tokens, Some(23));
+        assert_eq!(total_usage.reasoning_tokens, Some(3));
+        assert_eq!(total_usage.cached_tokens, Some(1));
     }
 }

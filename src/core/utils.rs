@@ -87,3 +87,41 @@ pub(crate) async fn handle_tool_call(
         options.step_count = Some(step_count);
     }
 }
+
+pub fn sum_options(a: Option<usize>, b: Option<usize>) -> Option<usize> {
+    match (a, b) {
+        (Some(x), Some(y)) => Some(x + y),
+        (Some(x), None) => Some(x),
+        (None, Some(y)) => Some(y),
+        (None, None) => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sum_options_both_some() {
+        assert_eq!(sum_options(Some(1), Some(2)), Some(3));
+        assert_eq!(sum_options(Some(0), Some(0)), Some(0));
+        assert_eq!(sum_options(Some(10), Some(20)), Some(30));
+    }
+
+    #[test]
+    fn test_sum_options_first_some_second_none() {
+        assert_eq!(sum_options(Some(5), None), Some(5));
+        assert_eq!(sum_options(Some(0), None), Some(0));
+    }
+
+    #[test]
+    fn test_sum_options_first_none_second_some() {
+        assert_eq!(sum_options(None, Some(7)), Some(7));
+        assert_eq!(sum_options(None, Some(0)), Some(0));
+    }
+
+    #[test]
+    fn test_sum_options_both_none() {
+        assert_eq!(sum_options(None, None), None);
+    }
+}
