@@ -19,6 +19,6 @@ pub use aisdk_macros::tool;
 pub use language_model::{
     GenerateTextResponse, LanguageModelRequest, LanguageModelStreamChunkType, StreamTextResponse,
 };
-pub use messages::{Message, Role, SystemMessage, UserMessage};
+pub use messages::{AssistantMessage, Message, Role, SystemMessage, UserMessage};
 pub use provider::Provider;
 pub use tools::{Tool, ToolCallInfo, ToolOutputInfo};
