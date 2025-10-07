@@ -1,9 +1,6 @@
 use crate::core::{
     Message, ToolCallInfo, ToolOutputInfo,
-    language_model::{
-        DEFAULT_TOOL_STEP_COUNT, LanguageModelOptions, LanguageModelResponseContentType,
-    },
-    messages::AssistantMessage,
+    language_model::{DEFAULT_TOOL_STEP_COUNT, LanguageModelOptions},
 };
 
 /// Resolves the message to be used for text generation.
@@ -37,7 +34,7 @@ pub fn resolve_message(
     (system, messages)
 }
 
-/// Calls the requested tools, updates the messages, and decrements the step count.
+/// Calls the requested tools, adds tool ouput message to messages, and decrements the step count.
 pub async fn handle_tool_call(
     options: &mut LanguageModelOptions,
     inputs: Vec<ToolCallInfo>,
@@ -60,11 +57,6 @@ pub async fn handle_tool_call(
                 tool_output_infos.push(tool_output_info.clone());
 
                 // update messages
-                let _ = &options
-                    .messages
-                    .push(Message::Assistant(AssistantMessage::new(
-                        LanguageModelResponseContentType::ToolCall(tool_info),
-                    )));
                 let _ = &options.messages.push(Message::Tool(tool_output_info));
             });
         *outputs = tool_output_infos;

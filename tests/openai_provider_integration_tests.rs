@@ -241,7 +241,7 @@ async fn test_stream_text_with_output_schema() {
 
     let response = LanguageModelRequest::builder()
         .model(OpenAI::new("gpt-4o"))
-        .prompt("generate user with dummy data, and and name of 'John Doe'")
+        .prompt("generate user with dummy data, and add name of 'John Doe'")
         .schema::<User>()
         .build()
         .stream_text()
@@ -256,6 +256,8 @@ async fn test_stream_text_with_output_schema() {
             buf.push_str(&text);
         }
     }
+
+    println!("buf: {}", buf);
 
     let user: User = serde_json::from_str(&buf).unwrap();
 

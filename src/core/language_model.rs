@@ -156,6 +156,15 @@ impl LanguageModelResponseContentType {
     }
 }
 
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+pub struct Usage {
+    pub input_tokens: Option<u32>,
+    pub output_tokens: Option<u32>,
+    pub total_tokens: Option<u32>,
+    pub reasoning_tokens: Option<u32>,
+    pub cached_tokens: Option<u32>,
+}
+
 // TODO: constract a standard response type
 /// Response from a language model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -168,6 +177,9 @@ pub struct LanguageModelResponse {
 
     /// The reason the model stopped generating text.
     pub stop_reason: Option<String>,
+
+    /// Usage information
+    pub usage: Option<Usage>,
 }
 
 impl LanguageModelResponse {
@@ -177,6 +189,7 @@ impl LanguageModelResponse {
             content: LanguageModelResponseContentType::new(text.into()),
             model: None,
             stop_reason: None,
+            usage: None,
         }
     }
 }

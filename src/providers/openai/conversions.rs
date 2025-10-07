@@ -1,13 +1,12 @@
 //! Helper functions and conversions for the OpenAI provider.
 
-use crate::core::language_model::LanguageModelOptions;
-use crate::core::language_model::LanguageModelResponseContentType;
+use crate::core::language_model::{LanguageModelOptions, LanguageModelResponseContentType, Usage};
 use crate::core::messages::Message;
 use crate::core::tools::Tool;
 use async_openai::types::ResponseFormatJsonSchema;
 use async_openai::types::responses::{
     CreateResponse, Function, Input, InputContent, InputItem, InputMessage, InputMessageType, Role,
-    TextConfig, TextResponseFormat, ToolDefinition,
+    TextConfig, TextResponseFormat, ToolDefinition, Usage as OpenAIUsage,
 };
 use schemars::Schema;
 use serde_json::Value;
@@ -123,6 +122,18 @@ impl From<Message> for InputItem {
                 text_inp.content = InputContent::TextInput(d);
                 InputItem::Message(text_inp)
             }
+        }
+    }
+}
+
+impl From<OpenAIUsage> for Usage {
+    fn from(value: OpenAIUsage) -> Self {
+        Self {
+            input_tokens: Some(value.input_tokens),
+            output_tokens: Some(value.output_tokens),
+            total_tokens: Some(value.total_tokens),
+            cached_tokens: Some(value.input_tokens_details.cached_tokens.unwrap_or(0)),
+            reasoning_tokens: Some(value.output_tokens_details.reasoning_tokens.unwrap_or(0)),
         }
     }
 }
