@@ -36,7 +36,11 @@ impl From<Tool> for ToolDefinition {
 
 impl From<LanguageModelOptions> for CreateResponse {
     fn from(options: LanguageModelOptions) -> Self {
-        let mut items: Vec<InputItem> = options.messages.into_iter().map(|m| m.into()).collect();
+        let mut items: Vec<InputItem> = options
+            .messages
+            .into_iter()
+            .map(|m| m.message.into())
+            .collect();
 
         // system prompt first since openai likes it at the top
         if let Some(system) = options.system {

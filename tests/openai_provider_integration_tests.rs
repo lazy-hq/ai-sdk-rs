@@ -330,3 +330,88 @@ async fn test_generate_stream_with_tools() {
 
     assert!(buf.contains("ishak"));
 }
+
+#[tokio::test]
+async fn test_step_id_basic_assignment() {
+    dotenv().ok();
+
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        println!("Skipping test: OPENAI_API_KEY not set");
+        return;
+    }
+
+    let result = LanguageModelRequest::builder()
+        .model(OpenAI::new("gpt-4o"))
+        .prompt("Respond with exactly 'test' in lowercase.")
+        .build()
+        .generate_text()
+        .await
+        .unwrap();
+
+    // Check step_ids: system (0), user (0), assistant (1)
+    let step_ids = result.step_ids();
+    assert_eq!(step_ids.len(), 3);
+    assert_eq!(step_ids[0], 0); // system
+    assert_eq!(step_ids[1], 0); // user
+    assert_eq!(step_ids[2], 1); // assistant
+}
+
+#[tokio::test]
+async fn test_step_id_tool_call_flow() {
+    dotenv().ok();
+
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        println!("Skipping test: OPENAI_API_KEY not set");
+        return;
+    }
+
+    #[tool]
+    fn get_test_value() -> Result<String> {
+        Ok("test_value".to_string())
+    }
+
+    let result = LanguageModelRequest::builder()
+        .model(OpenAI::new("gpt-4o"))
+        .system("Call the tool to get the test value.")
+        .prompt("What is the test value?")
+        .with_tool(get_test_value())
+        .build()
+        .generate_text()
+        .await
+        .unwrap();
+
+    let step_ids = result.step_ids();
+    // system (0), user (0), assistant tool call (1), tool result (1), assistant text (3)
+    assert!(step_ids.len() >= 5);
+    assert_eq!(step_ids[0], 0);
+    assert_eq!(step_ids[1], 0);
+    assert_eq!(step_ids[2], 1); // assistant tool call
+    assert_eq!(step_ids[3], 1); // tool result
+    assert_eq!(step_ids[4], 3); // assistant text
+    assert!(result.text().unwrap().contains("test_value"));
+}
+
+#[tokio::test]
+async fn test_step_id_streaming() {
+    dotenv().ok();
+
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        println!("Skipping test: OPENAI_API_KEY not set");
+        return;
+    }
+
+    let response = LanguageModelRequest::builder()
+        .model(OpenAI::new("gpt-4o"))
+        .prompt("Respond with 'stream test'")
+        .build()
+        .stream_text()
+        .await
+        .unwrap();
+
+    let step_ids = response.step_ids();
+    // system (0), user (0), assistant (1)
+    assert_eq!(step_ids.len(), 3);
+    assert_eq!(step_ids[0], 0);
+    assert_eq!(step_ids[1], 0);
+    assert_eq!(step_ids[2], 1);
+}

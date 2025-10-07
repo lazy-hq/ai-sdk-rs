@@ -5,7 +5,7 @@
 //! underlying implementation details of different AI providers, offering a
 //! unified interface for various operations like text generation or streaming.
 
-use crate::core::messages::AssistantMessage;
+use crate::core::messages::{AssistantMessage, TaggedMessage};
 use crate::core::tools::{Tool, ToolList};
 use crate::core::utils::{handle_tool_call, resolve_message};
 use crate::core::{Message, ToolCallInfo, ToolOutputInfo};
@@ -79,7 +79,7 @@ pub struct LanguageModelOptions {
 
     /// The messages to generate text from.
     /// At least User Message is required.
-    pub messages: Vec<Message>,
+    pub(crate) messages: Vec<TaggedMessage>,
 
     /// Output format schema.
     pub schema: Option<Schema>,
@@ -120,6 +120,9 @@ pub struct LanguageModelOptions {
 
     /// List of tools to use.
     pub tools: Option<ToolList>,
+
+    /// Used to track message steps
+    pub(crate) current_step_id: usize,
     // Additional provider-specific options. They are passed through
     // to the provider from the AI SDK and enable provider-specific functionality.
     //TODO: add support for provider options
@@ -129,6 +132,10 @@ pub struct LanguageModelOptions {
 impl LanguageModelOptions {
     pub fn builder() -> LanguageModelOptionsBuilder {
         LanguageModelOptionsBuilder::default()
+    }
+
+    pub fn messages(&self) -> Vec<Message> {
+        self.messages.iter().map(|m| m.message.clone()).collect()
     }
 }
 
@@ -380,7 +387,7 @@ impl<M: LanguageModel> LanguageModelRequestBuilder<M, SystemStage> {
             model: self.model,
             prompt: self.prompt,
             options: LanguageModelOptions {
-                messages,
+                messages: messages.into_iter().map(|msg| msg.into()).collect(),
                 ..self.options
             },
             state: std::marker::PhantomData,
@@ -404,7 +411,7 @@ impl<M: LanguageModel> LanguageModelRequestBuilder<M, ConversationStage> {
             model: self.model,
             prompt: self.prompt,
             options: LanguageModelOptions {
-                messages,
+                messages: messages.into_iter().map(|msg| msg.into()).collect(),
                 ..self.options
             },
             state: std::marker::PhantomData,
@@ -484,9 +491,9 @@ impl<M: LanguageModel> LanguageModelRequestBuilder<M, OptionsStage> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerateTextResponse {
     /// The options that generated this response
-    options: LanguageModelOptions,
+    pub options: LanguageModelOptions, // TODO: implement getters
     /// The model that generated the response.
-    model: Option<String>,
+    pub model: Option<String>,
 
     /// The reason the model stopped generating text.
     /// Might not necessaryly be an error. for errors, handle
@@ -506,12 +513,21 @@ impl GenerateTextResponse {
         }
     }
 
+    #[cfg(any(test, feature = "test-access"))]
+    pub fn step_ids(&self) -> Vec<usize> {
+        self.options.messages.iter().map(|t| t.step_id).collect()
+    }
+
     // TODO: incomplete code
     /// The last content of the response
     pub fn content(&self) -> Option<&LanguageModelResponseContentType> {
-        match self.options.messages.last() {
-            Some(Message::Assistant(content)) => Some(&content.content),
-            _ => None,
+        if let Some(msg) = self.options.messages.last() {
+            match msg.message {
+                Message::Assistant(ref content) => Some(&content.content),
+                _ => None,
+            }
+        } else {
+            None
         }
     }
 
@@ -519,12 +535,16 @@ impl GenerateTextResponse {
     /// The last text content of the response. returns None if the last
     /// returned content is not a text.
     pub fn text(&self) -> Option<&String> {
-        match self.options.messages.last() {
-            Some(Message::Assistant(AssistantMessage {
-                content: LanguageModelResponseContentType::Text(content),
-                ..
-            })) => Some(content),
-            _ => None,
+        if let Some(msg) = self.options.messages.last() {
+            match msg.message {
+                Message::Assistant(AssistantMessage {
+                    content: LanguageModelResponseContentType::Text(ref c),
+                    ..
+                }) => Some(c),
+                _ => None,
+            }
+        } else {
+            None
         }
     }
 
@@ -544,6 +564,12 @@ pub struct StreamTextResponse {
     pub model: Option<String>,
     /// The reason the model stopped generating text.
     pub options: LanguageModelOptions,
+}
+
+impl StreamTextResponse {
+    pub fn step_ids(&self) -> Vec<usize> {
+        self.options.messages.iter().map(|t| t.step_id).collect()
+    }
 }
 
 // ============================================================================
@@ -569,6 +595,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
             ..self.options
         };
 
+        options.current_step_id += 1;
         let response = self.model.generate_text(options.clone()).await?;
 
         match response.content {
@@ -577,7 +604,10 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
                     content: text.into(),
                     usage: response.usage.clone(),
                 });
-                options.messages.push(assistant_msg);
+                options
+                    .messages
+                    .push(TaggedMessage::new(options.current_step_id, assistant_msg));
+
                 Ok(GenerateTextResponse {
                     options,
                     model: response.model,
@@ -587,17 +617,19 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
             }
             LanguageModelResponseContentType::ToolCall(tool_info) => {
                 // add tool message
-                let _ = &options
-                    .messages
-                    .push(Message::Assistant(AssistantMessage::new(
+                let _ = &options.messages.push(TaggedMessage::new(
+                    options.current_step_id,
+                    Message::Assistant(AssistantMessage::new(
                         LanguageModelResponseContentType::ToolCall(tool_info.clone()),
                         response.usage,
-                    )));
+                    )),
+                ));
 
                 let mut tool_steps = Vec::new();
                 handle_tool_call(&mut options, vec![tool_info], &mut tool_steps).await;
 
-                // update anything that might change in `handle_tool_call`
+                // update anything options
+                options.current_step_id += 1;
                 self.options = options;
 
                 // call the next step with the tool results
@@ -624,6 +656,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
             ..self.options
         };
 
+        options.current_step_id += 1;
         let mut response = self.model.stream_text(options.to_owned()).await?;
 
         let (tx, stream) = MpmcStream::new();
@@ -638,19 +671,20 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
                                 content: text.clone().into(),
                                 usage: assistant_msg.usage.clone(),
                             });
-                            options.messages.push(assistant_msg);
+                            options.messages.push(TaggedMessage {
+                                step_id: options.current_step_id,
+                                message: assistant_msg,
+                            });
                         }
                         LanguageModelResponseContentType::ToolCall(tool_info) => {
                             // add tool message
-                            let _ =
-                                &options
-                                    .messages
-                                    .push(Message::Assistant(AssistantMessage::new(
-                                        LanguageModelResponseContentType::ToolCall(
-                                            tool_info.clone(),
-                                        ),
-                                        usage.clone(),
-                                    )));
+                            let assistant_msg = Message::Assistant(AssistantMessage::new(
+                                LanguageModelResponseContentType::ToolCall(tool_info.clone()),
+                                usage.clone(),
+                            ));
+                            let _ = &options
+                                .messages
+                                .push(TaggedMessage::new(options.current_step_id, assistant_msg));
 
                             let mut current_tool_steps = Vec::new();
                             handle_tool_call(
@@ -660,6 +694,8 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
                             )
                             .await;
 
+                            // update anything options
+                            options.current_step_id += 1;
                             self.options = options.clone();
 
                             // call the next step

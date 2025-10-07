@@ -14,10 +14,12 @@ categories = ["api-bindings", "asynchronous"]
 full = ["openai", "prompt"]
 openai = ["async-openai"]
 prompt = ["tera", "glob"]
+test-access = []
 
 [[test]]
 name = "openai_provider_integration_tests"
-required-features = ["openai"]
+required-features = ["openai", "test-access"]
+
 
 [dependencies]
 tera = { version = "1", optional = true }

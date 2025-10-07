@@ -224,3 +224,38 @@ impl MessageBuilder<Conversation> {
         }
     }
 }
+
+/// A message tagged with its step id in a list of messages
+/// used for tracking steps in a conversation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct TaggedMessage {
+    pub step_id: usize,
+    pub message: Message,
+}
+
+impl TaggedMessage {
+    pub fn new(step_id: usize, message: Message) -> Self {
+        Self { step_id, message }
+    }
+
+    pub fn initial_step_msg(message: Message) -> Self {
+        Self {
+            step_id: 0,
+            message,
+        }
+    }
+}
+
+// conversions assume message is in initial step
+impl From<Message> for TaggedMessage {
+    fn from(value: Message) -> Self {
+        Self::initial_step_msg(value)
+    }
+}
+
+// conversions disregard tagging information
+impl From<TaggedMessage> for Message {
+    fn from(value: TaggedMessage) -> Self {
+        value.message
+    }
+}
