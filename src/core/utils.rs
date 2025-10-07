@@ -91,9 +91,7 @@ pub(crate) async fn handle_tool_call(
 pub fn sum_options(a: Option<usize>, b: Option<usize>) -> Option<usize> {
     match (a, b) {
         (Some(x), Some(y)) => Some(x + y),
-        (Some(x), None) => Some(x),
-        (None, Some(y)) => Some(y),
-        (None, None) => None,
+        _ => a.or(b),
     }
 }
 
