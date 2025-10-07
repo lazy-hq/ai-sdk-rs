@@ -575,7 +575,7 @@ impl GenerateTextResponse {
     }
 
     // The final step
-    pub fn final_step(&self) -> Option<Step> {
+    pub fn last_step(&self) -> Option<Step> {
         let max_step = self.options.messages.iter().map(|t| t.step_id).max()?;
         self.step(max_step)
     }
@@ -1065,7 +1065,7 @@ mod tests {
             usage: None,
         };
 
-        let final_step = response.final_step().unwrap();
+        let final_step = response.last_step().unwrap();
         assert_eq!(final_step.step_id, 2);
         assert_eq!(final_step.messages.len(), 1);
     }
