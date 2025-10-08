@@ -9,7 +9,7 @@ use crate::core::messages::{AssistantMessage, TaggedMessage};
 use crate::core::tools::{Tool, ToolList};
 use crate::core::utils;
 use crate::core::utils::{handle_tool_call, resolve_message};
-use crate::core::{Message, ToolCallInfo, ToolOutputInfo};
+use crate::core::{Message, ToolCallInfo, ToolResultInfo};
 use crate::error::{Error, Result};
 use async_trait::async_trait;
 use derive_builder::Builder;
@@ -93,6 +93,37 @@ impl Step {
                 _ => None,
             })
             .fold(Usage::default(), |acc, u| &acc + u)
+    }
+
+    pub fn tool_calls(&self) -> Option<Vec<ToolCallInfo>> {
+        let calls: Vec<ToolCallInfo> = self
+            .messages
+            .iter()
+            .filter_map(|msg| match msg {
+                Message::Assistant(AssistantMessage {
+                    content: LanguageModelResponseContentType::ToolCall(info),
+                    ..
+                }) => Some(info.clone()),
+                _ => None,
+            })
+            .collect();
+        if calls.is_empty() { None } else { Some(calls) }
+    }
+
+    pub fn tool_results(&self) -> Option<Vec<ToolResultInfo>> {
+        let results: Vec<ToolResultInfo> = self
+            .messages
+            .iter()
+            .filter_map(|msg| match msg {
+                Message::Tool(info) => Some(info.clone()),
+                _ => None,
+            })
+            .collect();
+        if results.is_empty() {
+            None
+        } else {
+            Some(results)
+        }
     }
 }
 
@@ -635,7 +666,7 @@ impl GenerateTextResponse {
         }
     }
 
-    pub fn tool_results(&self) -> Option<Vec<ToolOutputInfo>> {
+    pub fn tool_results(&self) -> Option<Vec<ToolResultInfo>> {
         todo!("The tool results")
     }
     // TODO: Everything that needs to be extracted from the last step
@@ -1157,5 +1188,241 @@ mod tests {
         assert_eq!(total_usage.total_tokens, Some(23));
         assert_eq!(total_usage.reasoning_tokens, Some(3));
         assert_eq!(total_usage.cached_tokens, Some(1));
+    }
+
+    // Tests for tool_calls()
+    #[test]
+    fn test_step_tool_calls_empty_messages() {
+        let step = Step::new(0, vec![]);
+        assert_eq!(step.tool_calls(), None);
+    }
+
+    #[test]
+    fn test_step_tool_calls_only_non_assistant_messages() {
+        let messages = vec![
+            Message::System("System".to_string().into()),
+            Message::User("User".to_string().into()),
+            Message::Tool(ToolResultInfo::new("tool1")),
+        ];
+        let step = Step::new(0, messages);
+        assert_eq!(step.tool_calls(), None);
+    }
+
+    #[test]
+    fn test_step_tool_calls_single_assistant_with_tool_call() {
+        let tool_call = ToolCallInfo::new("test_tool");
+        let messages = vec![Message::Assistant(AssistantMessage {
+            content: LanguageModelResponseContentType::ToolCall(tool_call.clone()),
+            usage: None,
+        })];
+        let step = Step::new(0, messages);
+        let calls = step.tool_calls().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].tool.name, "test_tool");
+    }
+
+    #[test]
+    fn test_step_tool_calls_multiple_assistant_with_tool_calls() {
+        let tool_call1 = ToolCallInfo::new("tool1");
+        let tool_call2 = ToolCallInfo::new("tool2");
+        let messages = vec![
+            Message::Assistant(AssistantMessage {
+                content: LanguageModelResponseContentType::ToolCall(tool_call1.clone()),
+                usage: None,
+            }),
+            Message::Assistant(AssistantMessage {
+                content: LanguageModelResponseContentType::ToolCall(tool_call2.clone()),
+                usage: None,
+            }),
+        ];
+        let step = Step::new(0, messages);
+        let calls = step.tool_calls().unwrap();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].tool.name, "tool1");
+        assert_eq!(calls[1].tool.name, "tool2");
+    }
+
+    #[test]
+    fn test_step_tool_calls_assistant_without_tool_call() {
+        let messages = vec![Message::Assistant(AssistantMessage {
+            content: LanguageModelResponseContentType::Text("Hello".to_string()),
+            usage: None,
+        })];
+        let step = Step::new(0, messages);
+        assert_eq!(step.tool_calls(), None);
+    }
+
+    #[test]
+    fn test_step_tool_calls_mixed_message_types() {
+        let tool_call = ToolCallInfo::new("test_tool");
+        let messages = vec![
+            Message::System("System".to_string().into()),
+            Message::User("User".to_string().into()),
+            Message::Assistant(AssistantMessage {
+                content: LanguageModelResponseContentType::ToolCall(tool_call.clone()),
+                usage: None,
+            }),
+            Message::Tool(ToolResultInfo::new("other_tool")),
+        ];
+        let step = Step::new(0, messages);
+        let calls = step.tool_calls().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].tool.name, "test_tool");
+    }
+
+    #[test]
+    fn test_step_tool_calls_duplicate_tool_calls() {
+        let tool_call1 = ToolCallInfo::new("tool1");
+        let tool_call2 = ToolCallInfo::new("tool1"); // Same name
+        let messages = vec![
+            Message::Assistant(AssistantMessage {
+                content: LanguageModelResponseContentType::ToolCall(tool_call1.clone()),
+                usage: None,
+            }),
+            Message::Assistant(AssistantMessage {
+                content: LanguageModelResponseContentType::ToolCall(tool_call2.clone()),
+                usage: None,
+            }),
+        ];
+        let step = Step::new(0, messages);
+        let calls = step.tool_calls().unwrap();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].tool.name, "tool1");
+        assert_eq!(calls[1].tool.name, "tool1");
+    }
+
+    // Tests for tool_results()
+    #[test]
+    fn test_step_tool_results_empty_messages() {
+        let step = Step::new(0, vec![]);
+        assert_eq!(step.tool_results(), None);
+    }
+
+    #[test]
+    fn test_step_tool_results_only_non_tool_messages() {
+        let messages = vec![
+            Message::System("System".to_string().into()),
+            Message::User("User".to_string().into()),
+            Message::Assistant(AssistantMessage {
+                content: LanguageModelResponseContentType::Text("Assistant".to_string()),
+                usage: None,
+            }),
+        ];
+        let step = Step::new(0, messages);
+        assert_eq!(step.tool_results(), None);
+    }
+
+    #[test]
+    fn test_step_tool_results_single_tool_message() {
+        let tool_result = ToolResultInfo::new("test_tool");
+        let messages = vec![Message::Tool(tool_result.clone())];
+        let step = Step::new(0, messages);
+        let results = step.tool_results().unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].tool.name, "test_tool");
+    }
+
+    #[test]
+    fn test_step_tool_results_multiple_tool_messages() {
+        let tool_result1 = ToolResultInfo::new("tool1");
+        let tool_result2 = ToolResultInfo::new("tool2");
+        let messages = vec![
+            Message::Tool(tool_result1.clone()),
+            Message::Tool(tool_result2.clone()),
+        ];
+        let step = Step::new(0, messages);
+        let results = step.tool_results().unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].tool.name, "tool1");
+        assert_eq!(results[1].tool.name, "tool2");
+    }
+
+    #[test]
+    fn test_step_tool_results_mixed_message_types() {
+        let tool_result = ToolResultInfo::new("test_tool");
+        let messages = vec![
+            Message::System("System".to_string().into()),
+            Message::User("User".to_string().into()),
+            Message::Tool(tool_result.clone()),
+            Message::Assistant(AssistantMessage {
+                content: LanguageModelResponseContentType::Text("Assistant".to_string()),
+                usage: None,
+            }),
+        ];
+        let step = Step::new(0, messages);
+        let results = step.tool_results().unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].tool.name, "test_tool");
+    }
+
+    #[test]
+    fn test_step_tool_results_no_tool_messages_but_others_present() {
+        let messages = vec![
+            Message::System("System".to_string().into()),
+            Message::User("User".to_string().into()),
+            Message::Assistant(AssistantMessage {
+                content: LanguageModelResponseContentType::Text("Assistant".to_string()),
+                usage: None,
+            }),
+        ];
+        let step = Step::new(0, messages);
+        assert_eq!(step.tool_results(), None);
+    }
+
+    #[test]
+    fn test_step_tool_results_duplicate_tool_entries() {
+        let tool_result1 = ToolResultInfo::new("tool1");
+        let tool_result2 = ToolResultInfo::new("tool1"); // Same name
+        let messages = vec![
+            Message::Tool(tool_result1.clone()),
+            Message::Tool(tool_result2.clone()),
+        ];
+        let step = Step::new(0, messages);
+        let results = step.tool_results().unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].tool.name, "tool1");
+        assert_eq!(results[1].tool.name, "tool1");
+    }
+
+    #[test]
+    fn test_step_tool_results_preserving_original_message_order() {
+        let tool_result1 = ToolResultInfo::new("tool1");
+        let tool_result2 = ToolResultInfo::new("tool2");
+        let tool_result3 = ToolResultInfo::new("tool3");
+        let messages = vec![
+            Message::System("System".to_string().into()),
+            Message::Tool(tool_result1.clone()),
+            Message::User("User".to_string().into()),
+            Message::Tool(tool_result2.clone()),
+            Message::Assistant(AssistantMessage {
+                content: LanguageModelResponseContentType::Text("Assistant".to_string()),
+                usage: None,
+            }),
+            Message::Tool(tool_result3.clone()),
+        ];
+        let step = Step::new(0, messages);
+        let results = step.tool_results().unwrap();
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].tool.name, "tool1");
+        assert_eq!(results[1].tool.name, "tool2");
+        assert_eq!(results[2].tool.name, "tool3");
+    }
+
+    #[test]
+    fn test_step_tool_results_large_number_of_messages() {
+        let mut messages = Vec::new();
+        // Add 1000 messages with tool results interspersed
+        for i in 0..1000 {
+            messages.push(Message::Tool(ToolResultInfo::new(&format!("tool{}", i))));
+            if i % 100 == 0 {
+                messages.push(Message::User(format!("User message {}", i).into()));
+            }
+        }
+        let step = Step::new(0, messages);
+        let results = step.tool_results().unwrap();
+        assert_eq!(results.len(), 1000);
+        for (i, result) in results.iter().enumerate() {
+            assert_eq!(result.tool.name, format!("tool{}", i));
+        }
     }
 }

@@ -1,5 +1,5 @@
 use crate::core::{
-    Message, ToolCallInfo, ToolOutputInfo,
+    Message, ToolCallInfo, ToolResultInfo,
     language_model::{DEFAULT_TOOL_STEP_COUNT, LanguageModelOptions},
     messages::TaggedMessage,
 };
@@ -45,7 +45,7 @@ pub(crate) fn resolve_message(
 pub(crate) async fn handle_tool_call(
     options: &mut LanguageModelOptions,
     inputs: Vec<ToolCallInfo>,
-    outputs: &mut Vec<ToolOutputInfo>,
+    outputs: &mut Vec<ToolResultInfo>,
 ) {
     if let Some(tools) = &options.tools {
         let tool_results = tools.execute(inputs.clone()).await;
@@ -54,7 +54,7 @@ pub(crate) async fn handle_tool_call(
             .into_iter()
             .zip(inputs)
             .for_each(|(tool_result, tool_info)| {
-                let mut tool_output_info = ToolOutputInfo::new(&tool_info.tool.name);
+                let mut tool_output_info = ToolResultInfo::new(&tool_info.tool.name);
                 let output = match tool_result {
                     Ok(result) => serde_json::Value::String(result),
                     Err(err) => serde_json::Value::String(format!("Error: {}", err)),

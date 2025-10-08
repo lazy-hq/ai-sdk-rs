@@ -22,4 +22,4 @@ pub use language_model::{
 };
 pub use messages::{AssistantMessage, Message, Role, SystemMessage, UserMessage};
 pub use provider::Provider;
-pub use tools::{Tool, ToolCallInfo, ToolOutputInfo};
+pub use tools::{Tool, ToolCallInfo, ToolResultInfo};

@@ -1,5 +1,5 @@
 use crate::core::{
-    ToolOutputInfo,
+    ToolResultInfo,
     language_model::{LanguageModelResponseContentType, Usage},
 };
 use serde::{Deserialize, Serialize};
@@ -18,7 +18,7 @@ pub enum Message {
     System(SystemMessage),
     User(UserMessage),
     Assistant(AssistantMessage),
-    Tool(ToolOutputInfo),
+    Tool(ToolResultInfo),
     Developer(String),
 }
 

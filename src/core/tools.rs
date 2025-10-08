@@ -121,7 +121,7 @@ impl ToolList {
     }
 }
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq)]
 /// Describes a tool
 pub struct ToolDetails {
     // the name of the tool, usually a function name.
@@ -131,7 +131,7 @@ pub struct ToolDetails {
 }
 
 /// Contains information necessary to call a tool
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ToolCallInfo {
     pub tool: ToolDetails,
     pub input: serde_json::Value,
@@ -162,13 +162,13 @@ impl ToolCallInfo {
 }
 
 /// Contains information from a tool
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
-pub struct ToolOutputInfo {
+#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ToolResultInfo {
     pub tool: ToolDetails,
     pub output: serde_json::Value,
 }
 
-impl ToolOutputInfo {
+impl ToolResultInfo {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             tool: ToolDetails {
