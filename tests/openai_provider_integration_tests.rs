@@ -31,7 +31,12 @@ async fn test_generate_text_with_openai() {
 
     assert!(result.is_ok());
 
-    let text = result.as_ref().expect("Failed to get result").text.trim();
+    let text = result
+        .as_ref()
+        .expect("Failed to get result")
+        .text()
+        .unwrap()
+        .trim();
     assert!(text.contains("hello"));
 }
 
@@ -96,7 +101,12 @@ async fn test_generate_text_with_system_prompt() {
 
     assert!(result.is_ok());
 
-    let text = result.as_ref().expect("Failed to get result").text.trim();
+    let text = result
+        .as_ref()
+        .expect("Failed to get result")
+        .text()
+        .unwrap()
+        .trim();
     assert!(text.contains("hello"));
 }
 
@@ -132,7 +142,12 @@ async fn test_generate_text_with_messages() {
     let result = language_model.generate_text().await;
     assert!(result.is_ok());
 
-    let text = result.as_ref().expect("Failed to get result").text.trim();
+    let text = result
+        .as_ref()
+        .expect("Failed to get result")
+        .text()
+        .unwrap()
+        .trim();
     assert!(text.contains("Surafel"));
 }
 
@@ -163,7 +178,12 @@ async fn test_generate_text_with_messages_and_system_prompt() {
 
     assert!(result.is_ok());
 
-    let text = result.as_ref().expect("Failed to get result").text.trim();
+    let text = result
+        .as_ref()
+        .expect("Failed to get result")
+        .text()
+        .unwrap()
+        .trim();
     assert!(text.contains("hello"));
 }
 
@@ -221,7 +241,7 @@ async fn test_stream_text_with_output_schema() {
 
     let response = LanguageModelRequest::builder()
         .model(OpenAI::new("gpt-4o"))
-        .prompt("generate user with dummy data, and and name of 'John Doe'")
+        .prompt("generate user with dummy data, and add name of 'John Doe'")
         .schema::<User>()
         .build()
         .stream_text()
@@ -236,6 +256,8 @@ async fn test_stream_text_with_output_schema() {
             buf.push_str(&text);
         }
     }
+
+    println!("buf: {}", buf);
 
     let user: User = serde_json::from_str(&buf).unwrap();
 
@@ -268,88 +290,7 @@ async fn test_generate_text_with_tools() {
         .await
         .unwrap();
 
-    assert!(response.text.contains("ishak"));
-}
-
-#[tokio::test]
-async fn test_generate_text_with_tools_and_step_counts() {
-    dotenv().ok();
-    // This test requires a valid OpenAI API key to be set in the environment.
-    if std::env::var("OPENAI_API_KEY").is_err() {
-        println!("Skipping test: OPENAI_API_KEY not set");
-        return;
-    }
-
-    #[tool]
-    /// Returns the username
-    fn get_username() {
-        Err("username not found. please try again with `get_username_2`".to_string())
-    }
-
-    #[tool]
-    /// Returns the username
-    fn get_username_2() {
-        Ok("ishak".to_string())
-    }
-
-    let response = LanguageModelRequest::builder()
-        .model(OpenAI::new("gpt-4o"))
-        .system("Call a tool to get the username. always start with the `get_username` tool. try another tool if not found or get an error.")
-        .prompt("What is the username?")
-        .step_count(2)
-        .with_tool(get_username())
-        .with_tool(get_username_2())
-        .build()
-        .stream_text()
-        .await
-        .unwrap();
-
-    assert!(response.steps.is_some());
-    assert_eq!(response.steps.unwrap().len(), 2);
-}
-
-#[tokio::test]
-async fn test_generate_text_with_tools_and_step_counts_where_steps_are_exeeded() {
-    dotenv().ok();
-    // This test requires a valid OpenAI API key to be set in the environment.
-    if std::env::var("OPENAI_API_KEY").is_err() {
-        println!("Skipping test: OPENAI_API_KEY not set");
-        return;
-    }
-
-    #[tool]
-    /// Returns the username
-    fn get_username() {
-        Err("username not found. please try `get_username_2`".to_string())
-    }
-
-    #[tool]
-    /// Returns the username
-    fn get_username_2() {
-        Ok("username not found. please try other options".to_string())
-    }
-
-    #[tool]
-    /// Returns the username
-    fn get_username_3() {
-        Err("ishak".to_string())
-    }
-
-    let response = LanguageModelRequest::builder()
-        .model(OpenAI::new("gpt-4o"))
-        .system("Call a tool to get the username. always start with the `get_username` tool. try another tool if not found or get an error.")
-        .prompt("What is the username?")
-        .step_count(2)
-        .with_tool(get_username())
-        .with_tool(get_username_2())
-        .with_tool(get_username_3())
-        .build()
-        .generate_text()
-        .await
-        .unwrap();
-
-    assert!(response.steps.is_some());
-    assert_eq!(response.steps.unwrap().len(), 2);
+    assert!(response.text().unwrap().contains("ishak"));
 }
 
 #[tokio::test]
@@ -391,82 +332,86 @@ async fn test_generate_stream_with_tools() {
 }
 
 #[tokio::test]
-async fn test_generate_stream_with_tools_and_step_counts() {
+async fn test_step_id_basic_assignment() {
     dotenv().ok();
-    // This test requires a valid OpenAI API key to be set in the environment.
+
     if std::env::var("OPENAI_API_KEY").is_err() {
         println!("Skipping test: OPENAI_API_KEY not set");
         return;
     }
 
-    #[tool]
-    /// Returns the username
-    fn get_username() {
-        Err("username not found. please try with `get_username_2`".to_string())
-    }
-
-    #[tool]
-    /// Returns the username
-    fn get_username_2() {
-        Ok("ishak".to_string())
-    }
-
-    let response = LanguageModelRequest::builder()
+    let result = LanguageModelRequest::builder()
         .model(OpenAI::new("gpt-4o"))
-        .system("Call a tool to get the username. always start with the `get_username` tool. try another tool if not found or get an error.")
-        .prompt("What is the username?")
-        .step_count(2)
-        .with_tool(get_username())
-        .with_tool(get_username_2())
+        .prompt("Respond with exactly 'test' in lowercase.")
         .build()
-        .stream_text()
+        .generate_text()
         .await
         .unwrap();
 
-    assert!(response.steps.is_some());
-    assert_eq!(response.steps.unwrap().len(), 2);
+    // Check step_ids: system (0), user (0), assistant (1)
+    let step_ids = result.step_ids();
+    assert_eq!(step_ids.len(), 3);
+    assert_eq!(step_ids[0], 0); // system
+    assert_eq!(step_ids[1], 0); // user
+    assert_eq!(step_ids[2], 1); // assistant
 }
 
 #[tokio::test]
-async fn test_generate_stream_with_tools_and_step_counts_where_steps_are_exeeded() {
+async fn test_step_id_tool_call_flow() {
     dotenv().ok();
-    // This test requires a valid OpenAI API key to be set in the environment.
+
     if std::env::var("OPENAI_API_KEY").is_err() {
         println!("Skipping test: OPENAI_API_KEY not set");
         return;
     }
 
     #[tool]
-    /// Returns the username
-    fn get_username() {
-        Err("username not found. please try `get_username_2`".to_string())
+    fn get_test_value() -> Result<String> {
+        Ok("test_value".to_string())
     }
 
-    #[tool]
-    /// Returns the username
-    fn get_username_2() {
-        Ok("username not found. please try other options".to_string())
-    }
+    let result = LanguageModelRequest::builder()
+        .model(OpenAI::new("gpt-4o"))
+        .system("Call the tool to get the test value.")
+        .prompt("What is the test value?")
+        .with_tool(get_test_value())
+        .build()
+        .generate_text()
+        .await
+        .unwrap();
 
-    #[tool]
-    /// Returns the username
-    fn get_username_3() {
-        Err("ishak".to_string())
+    let step_ids = result.step_ids();
+    // system (0), user (0), assistant tool call (1), tool result (1), assistant text (3)
+    assert!(step_ids.len() >= 5);
+    assert_eq!(step_ids[0], 0);
+    assert_eq!(step_ids[1], 0);
+    assert_eq!(step_ids[2], 1); // assistant tool call
+    assert_eq!(step_ids[3], 1); // tool result
+    assert_eq!(step_ids[4], 3); // assistant text
+    assert!(result.text().unwrap().contains("test_value"));
+}
+
+#[tokio::test]
+async fn test_step_id_streaming() {
+    dotenv().ok();
+
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        println!("Skipping test: OPENAI_API_KEY not set");
+        return;
     }
 
     let response = LanguageModelRequest::builder()
         .model(OpenAI::new("gpt-4o"))
-        .system("Call a tool to get the username. always start with the `get_username` tool. try another tool if not found or get an error.")
-        .prompt("What is the username?")
-        .step_count(2)
-        .with_tool(get_username())
-        .with_tool(get_username_2())
-        .with_tool(get_username_3())
+        .prompt("Respond with 'stream test'")
         .build()
         .stream_text()
         .await
         .unwrap();
 
-    assert!(response.steps.is_some());
-    assert_eq!(response.steps.unwrap().len(), 2);
+    let step_ids = response.step_ids();
+    // system (0), user (0), assistant (1)
+    assert_eq!(step_ids.len(), 3);
+    assert_eq!(step_ids[0], 0);
+    assert_eq!(step_ids[1], 0);
+    assert_eq!(step_ids[2], 1);
 }

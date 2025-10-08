@@ -5,7 +5,9 @@
 //! underlying implementation details of different AI providers, offering a
 //! unified interface for various operations like text generation or streaming.
 
+use crate::core::messages::{AssistantMessage, TaggedMessage};
 use crate::core::tools::{Tool, ToolList};
+use crate::core::utils;
 use crate::core::utils::{handle_tool_call, resolve_message};
 use crate::core::{Message, ToolCallInfo, ToolOutputInfo};
 use crate::error::{Error, Result};
@@ -15,7 +17,10 @@ use futures::Stream;
 use futures::StreamExt;
 use schemars::{JsonSchema, Schema, schema_for};
 use serde::de::DeserializeOwned;
+use serde::ser::Error as SerdeError;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::ops::Add;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -68,6 +73,29 @@ pub trait LanguageModel: Send + Sync + std::fmt::Debug {
 // Section: structs and builders
 // ============================================================================
 
+/// A "step" represents a single cycle of model interaction.
+pub struct Step {
+    pub step_id: usize,
+    pub messages: Vec<Message>,
+}
+
+impl Step {
+    pub fn new(step_id: usize, messages: Vec<Message>) -> Self {
+        Self { step_id, messages }
+    }
+
+    // total usage of a step
+    pub fn usage(&self) -> Usage {
+        self.messages
+            .iter()
+            .filter_map(|m| match m {
+                Message::Assistant(AssistantMessage { usage, .. }) => usage.as_ref(),
+                _ => None,
+            })
+            .fold(Usage::default(), |acc, u| &acc + u)
+    }
+}
+
 /// Options for a language model request.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, Builder)]
 #[builder(pattern = "owned", setter(into), build_fn(error = "Error"))]
@@ -77,7 +105,7 @@ pub struct LanguageModelOptions {
 
     /// The messages to generate text from.
     /// At least User Message is required.
-    pub messages: Vec<Message>,
+    pub(crate) messages: Vec<TaggedMessage>,
 
     /// Output format schema.
     pub schema: Option<Schema>,
@@ -118,6 +146,9 @@ pub struct LanguageModelOptions {
 
     /// List of tools to use.
     pub tools: Option<ToolList>,
+
+    /// Used to track message steps
+    pub(crate) current_step_id: usize,
     // Additional provider-specific options. They are passed through
     // to the provider from the AI SDK and enable provider-specific functionality.
     //TODO: add support for provider options
@@ -128,6 +159,10 @@ impl LanguageModelOptions {
     pub fn builder() -> LanguageModelOptionsBuilder {
         LanguageModelOptionsBuilder::default()
     }
+
+    pub fn messages(&self) -> Vec<Message> {
+        self.messages.iter().map(|m| m.message.clone()).collect()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -136,9 +171,44 @@ pub enum LanguageModelResponseContentType {
     ToolCall(ToolCallInfo),
 }
 
+impl Default for LanguageModelResponseContentType {
+    fn default() -> Self {
+        Self::Text(String::new())
+    }
+}
+
+impl From<String> for LanguageModelResponseContentType {
+    fn from(value: String) -> Self {
+        Self::Text(value)
+    }
+}
+
 impl LanguageModelResponseContentType {
     pub fn new(text: impl Into<String>) -> Self {
         Self::Text(text.into())
+    }
+}
+
+#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Usage {
+    pub input_tokens: Option<usize>,
+    pub output_tokens: Option<usize>,
+    pub total_tokens: Option<usize>,
+    pub reasoning_tokens: Option<usize>,
+    pub cached_tokens: Option<usize>,
+}
+
+impl Add for &Usage {
+    type Output = Usage;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Usage {
+            input_tokens: utils::sum_options(self.input_tokens, rhs.input_tokens),
+            output_tokens: utils::sum_options(self.output_tokens, rhs.output_tokens),
+            total_tokens: utils::sum_options(self.total_tokens, rhs.total_tokens),
+            reasoning_tokens: utils::sum_options(self.reasoning_tokens, rhs.reasoning_tokens),
+            cached_tokens: utils::sum_options(self.cached_tokens, rhs.cached_tokens),
+        }
     }
 }
 
@@ -153,7 +223,12 @@ pub struct LanguageModelResponse {
     pub model: Option<String>,
 
     /// The reason the model stopped generating text.
+    /// Might not necessaryly be an error. for errors, handle
+    /// the `Result::Err` variant associated with this type.
     pub stop_reason: Option<String>,
+
+    /// Usage information
+    pub usage: Option<Usage>,
 }
 
 impl LanguageModelResponse {
@@ -163,6 +238,7 @@ impl LanguageModelResponse {
             content: LanguageModelResponseContentType::new(text.into()),
             model: None,
             stop_reason: None,
+            usage: None,
         }
     }
 }
@@ -175,32 +251,28 @@ pub enum LanguageModelStreamChunkType {
     /// Text chunk
     Text(String),
     /// Tool call argument chunk
-    ToolCall(ToolCallInfo),
-    /// The model has stopped generating text.
-    End,
+    ToolCall(String),
+    /// The model has stopped generating text successfully.
+    End(AssistantMessage),
     /// The model has failed to generate text.
-    Failed(String),
+    Failed(String), // TODO: add a type to accomodate provider and aisdk errors
     /// The model finsished generating text with incomplete response.
-    Incomplete(String),
+    Incomplete(String), // TODO: replace with StopReason
     /// Return this for unimplemented features for a specific model.
-    NotImplemented(String),
-}
-
-/// A response from a streaming language model.
-pub struct LanguageModelStreamResponse {
-    /// A stream of responses from the language model.
-    pub stream: LanguageModelStream,
-
-    /// The model that generated the response.
-    pub model: Option<String>,
-
-    /// The reason the model stopped generating text.
-    pub stop_reason: Option<String>,
+    NotSupported(String),
 }
 
 /// Stream of responses from mapped to a common interface.
 pub type LanguageModelStream =
     Pin<Box<dyn Stream<Item = Result<LanguageModelStreamChunkType>> + Send>>;
+
+/// A response from a streaming language model provider.
+pub struct LanguageModelStreamResponse {
+    /// A stream of responses from the language model.
+    pub stream: LanguageModelStream,
+    /// The model that generated the response.
+    pub model: Option<String>,
+}
 
 // Struct wrapper for MPMC channel to act as a stream
 pub struct MpmcStream {
@@ -355,7 +427,7 @@ impl<M: LanguageModel> LanguageModelRequestBuilder<M, SystemStage> {
             model: self.model,
             prompt: self.prompt,
             options: LanguageModelOptions {
-                messages,
+                messages: messages.into_iter().map(|msg| msg.into()).collect(),
                 ..self.options
             },
             state: std::marker::PhantomData,
@@ -379,14 +451,13 @@ impl<M: LanguageModel> LanguageModelRequestBuilder<M, ConversationStage> {
             model: self.model,
             prompt: self.prompt,
             options: LanguageModelOptions {
-                messages,
+                messages: messages.into_iter().map(|msg| msg.into()).collect(),
                 ..self.options
             },
             state: std::marker::PhantomData,
         }
     }
 }
-
 /// OptionsStage Builder
 impl<M: LanguageModel> LanguageModelRequestBuilder<M, OptionsStage> {
     pub fn schema<T: JsonSchema>(mut self) -> Self {
@@ -459,15 +530,116 @@ impl<M: LanguageModel> LanguageModelRequestBuilder<M, OptionsStage> {
 /// Response from a generate call on `GenerateText`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerateTextResponse {
-    /// The generated text.
-    pub text: String,
-    pub steps: Option<Vec<ToolOutputInfo>>,
+    /// The options that generated this response
+    pub options: LanguageModelOptions, // TODO: implement getters
+    /// The model that generated the response.
+    pub model: Option<String>,
+
+    /// The reason the model stopped generating text.
+    /// Might not necessaryly be an error. for errors, handle
+    /// the `Result::Err` variant associated with this type.
+    pub stop_reason: Option<String>,
+
+    /// Usage information of the last call
+    pub usage: Option<Usage>, // TODO: change to a function for total usage
 }
 
 impl GenerateTextResponse {
     pub fn into_schema<T: DeserializeOwned>(&self) -> std::result::Result<T, serde_json::Error> {
-        serde_json::from_str(&self.text)
+        if let Some(text) = &self.text() {
+            serde_json::from_str(text)
+        } else {
+            Err(serde_json::Error::custom("No text response found"))
+        }
     }
+
+    #[cfg(any(test, feature = "test-access"))]
+    pub fn step_ids(&self) -> Vec<usize> {
+        self.options.messages.iter().map(|t| t.step_id).collect()
+    }
+
+    // A specific step
+    pub fn step(&self, index: usize) -> Option<Step> {
+        let messages: Vec<Message> = self
+            .options
+            .messages
+            .iter()
+            .filter(|t| t.step_id == index)
+            .map(|t| t.message.clone())
+            .collect();
+        if messages.is_empty() {
+            None
+        } else {
+            Some(Step::new(index, messages))
+        }
+    }
+
+    // The final step
+    pub fn last_step(&self) -> Option<Step> {
+        let max_step = self.options.messages.iter().map(|t| t.step_id).max()?;
+        self.step(max_step)
+    }
+
+    // All the steps
+    pub fn steps(&self) -> Vec<Step> {
+        let mut step_map: HashMap<usize, Vec<Message>> = HashMap::new();
+        for tagged in &self.options.messages {
+            step_map
+                .entry(tagged.step_id)
+                .or_default()
+                .push(tagged.message.clone());
+        }
+        let mut steps: Vec<Step> = step_map
+            .into_iter()
+            .map(|(id, msgs)| Step::new(id, msgs))
+            .collect();
+        steps.sort_by_key(|s| s.step_id);
+        steps
+    }
+
+    // Total usage
+    pub fn usage(&self) -> Usage {
+        self.steps()
+            .iter()
+            .map(|s| s.usage())
+            .fold(Usage::default(), |acc, u| &acc + &u)
+    }
+
+    // TODO: incomplete code
+    /// The last content of the response
+    pub fn content(&self) -> Option<&LanguageModelResponseContentType> {
+        if let Some(msg) = self.options.messages.last() {
+            match msg.message {
+                Message::Assistant(ref content) => Some(&content.content),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    // TODO: incomplete code
+    /// The last text content of the response. returns None if the last
+    /// returned content is not a text.
+    pub fn text(&self) -> Option<&String> {
+        if let Some(msg) = self.options.messages.last() {
+            match msg.message {
+                Message::Assistant(AssistantMessage {
+                    content: LanguageModelResponseContentType::Text(ref c),
+                    ..
+                }) => Some(c),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn tool_results(&self) -> Option<Vec<ToolOutputInfo>> {
+        todo!("The tool results")
+    }
+    // TODO: Everything that needs to be extracted from the last step
+    // should go here ..
 }
 
 // TODO: add standard response fields
@@ -475,12 +647,16 @@ impl GenerateTextResponse {
 pub struct StreamTextResponse {
     /// A stream of responses from the language model.
     pub stream: MpmcStream,
-
     /// The model that generated the response.
     pub model: Option<String>,
+    /// The reason the model stopped generating text.
+    pub options: LanguageModelOptions,
+}
 
-    /// Tool output from each tool call.
-    pub steps: Option<Vec<ToolOutputInfo>>,
+impl StreamTextResponse {
+    pub fn step_ids(&self) -> Vec<usize> {
+        self.options.messages.iter().map(|t| t.step_id).collect()
+    }
 }
 
 // ============================================================================
@@ -495,8 +671,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
     ///
     /// Returns an `Error` if the underlying model fails to generate a response.
     pub async fn generate_text(&mut self) -> Result<GenerateTextResponse> {
-        let (system_prompt, messages) =
-            resolve_message(&self.options.system, &self.prompt, &self.options.messages);
+        let (system_prompt, messages) = resolve_message(&self.options, &self.prompt);
 
         let mut options = LanguageModelOptions {
             system: Some(system_prompt),
@@ -507,34 +682,47 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
             ..self.options
         };
 
+        options.current_step_id += 1;
         let response = self.model.generate_text(options.clone()).await?;
 
-        let mut steps: Option<Vec<ToolOutputInfo>> = None;
-        let text = match response.content {
-            LanguageModelResponseContentType::Text(text) => text,
-            LanguageModelResponseContentType::ToolCall(tool_info) => {
-                let mut new_steps = Vec::new();
-                handle_tool_call(&mut options, vec![tool_info], &mut new_steps).await;
+        match response.content {
+            LanguageModelResponseContentType::Text(text) => {
+                let assistant_msg = Message::Assistant(AssistantMessage {
+                    content: text.into(),
+                    usage: response.usage.clone(),
+                });
+                options
+                    .messages
+                    .push(TaggedMessage::new(options.current_step_id, assistant_msg));
 
-                // update anything that might change in `handle_tool_call`
-                self.messages = options.messages.clone();
-                self.tools = options.tools;
-                self.step_count = options.step_count;
-
-                // call the next step
-                let result = Box::pin(self.generate_text()).await?;
-
-                // update steps
-                new_steps.extend(result.steps.unwrap_or_default());
-                steps = Some(new_steps);
-
-                result.text
+                Ok(GenerateTextResponse {
+                    options,
+                    model: response.model,
+                    stop_reason: response.stop_reason,
+                    usage: response.usage,
+                })
             }
-        };
+            LanguageModelResponseContentType::ToolCall(tool_info) => {
+                // add tool message
+                let _ = &options.messages.push(TaggedMessage::new(
+                    options.current_step_id,
+                    Message::Assistant(AssistantMessage::new(
+                        LanguageModelResponseContentType::ToolCall(tool_info.clone()),
+                        response.usage,
+                    )),
+                ));
 
-        let result = GenerateTextResponse { text, steps };
+                let mut tool_steps = Vec::new();
+                handle_tool_call(&mut options, vec![tool_info], &mut tool_steps).await;
 
-        Ok(result)
+                // update anything options
+                options.current_step_id += 1;
+                self.options = options;
+
+                // call the next step with the tool results
+                Box::pin(self.generate_text()).await
+            }
+        }
     }
 
     /// Generates Streaming text using a specified language model.
@@ -544,8 +732,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
     ///
     /// Returns an `Error` if the underlying model fails to generate a response.
     pub async fn stream_text(&mut self) -> Result<StreamTextResponse> {
-        let (system_prompt, messages) =
-            resolve_message(&self.options.system, &self.prompt, &self.options.messages);
+        let (system_prompt, messages) = resolve_message(&self.options, &self.prompt);
 
         let mut options = LanguageModelOptions {
             system: Some(system_prompt),
@@ -556,40 +743,65 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
             ..self.options
         };
 
+        options.current_step_id += 1;
         let mut response = self.model.stream_text(options.to_owned()).await?;
 
-        let mut steps: Option<Vec<ToolOutputInfo>> = None;
         let (tx, stream) = MpmcStream::new();
+        let _ = tx.send(LanguageModelStreamChunkType::Start);
         while let Some(chunk) = response.stream.next().await {
             match chunk {
-                Ok(LanguageModelStreamChunkType::ToolCall(tool_info)) => {
-                    let mut cur_steps = Vec::new();
-                    handle_tool_call(&mut options, vec![tool_info], &mut cur_steps).await;
-
-                    // update anything that might change in `handle_tool_call`
-                    self.messages = options.messages.clone();
-                    self.tools = options.tools.clone();
-                    self.step_count = options.step_count;
-
-                    // call the next step
-                    let next_res = Box::pin(self.stream_text()).await;
-
-                    match next_res {
-                        Ok(StreamTextResponse {
-                            mut stream,
-                            steps: next_steps,
-                            ..
-                        }) => {
-                            // update steps
-                            cur_steps.extend(next_steps.unwrap_or_default());
-                            steps = Some(cur_steps);
-
-                            while let Some(chunk) = stream.next().await {
-                                let _ = tx.send(chunk);
-                            }
+                Ok(LanguageModelStreamChunkType::End(assistant_msg)) => {
+                    let usage = assistant_msg.usage.clone();
+                    match &assistant_msg.content {
+                        LanguageModelResponseContentType::Text(text) => {
+                            let assistant_msg = Message::Assistant(AssistantMessage {
+                                content: text.clone().into(),
+                                usage: assistant_msg.usage.clone(),
+                            });
+                            options.messages.push(TaggedMessage {
+                                step_id: options.current_step_id,
+                                message: assistant_msg,
+                            });
                         }
-                        Err(e) => {
-                            let _ = tx.send(LanguageModelStreamChunkType::Failed(e.to_string()));
+                        LanguageModelResponseContentType::ToolCall(tool_info) => {
+                            // add tool message
+                            let assistant_msg = Message::Assistant(AssistantMessage::new(
+                                LanguageModelResponseContentType::ToolCall(tool_info.clone()),
+                                usage.clone(),
+                            ));
+                            let _ = &options
+                                .messages
+                                .push(TaggedMessage::new(options.current_step_id, assistant_msg));
+
+                            let mut current_tool_steps = Vec::new();
+                            handle_tool_call(
+                                &mut options,
+                                vec![tool_info.clone()],
+                                &mut current_tool_steps,
+                            )
+                            .await;
+
+                            // update anything options
+                            options.current_step_id += 1;
+                            self.options = options.clone();
+
+                            // call the next step
+                            let next_res = Box::pin(self.stream_text()).await;
+
+                            match next_res {
+                                Ok(StreamTextResponse { mut stream, .. }) => {
+                                    while let Some(chunk) = stream.next().await {
+                                        let _ = tx.send(chunk);
+                                    }
+                                }
+                                Err(e) => {
+                                    // TODO: is this the right error to return. maybe Incomplete is
+                                    // correct
+                                    let _ = tx
+                                        .send(LanguageModelStreamChunkType::Failed(e.to_string()));
+                                    break;
+                                }
+                            };
                         }
                     };
                 }
@@ -598,6 +810,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
                 }
                 Err(e) => {
                     let _ = tx.send(LanguageModelStreamChunkType::Failed(e.to_string()));
+                    break;
                 }
             }
         }
@@ -607,9 +820,342 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
         let result = StreamTextResponse {
             stream,
             model: response.model,
-            steps,
+            options,
         };
 
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_usage_add_both_some() {
+        let u1 = Usage {
+            input_tokens: Some(10),
+            output_tokens: Some(20),
+            total_tokens: Some(30),
+            reasoning_tokens: Some(5),
+            cached_tokens: Some(2),
+        };
+        let u2 = Usage {
+            input_tokens: Some(15),
+            output_tokens: Some(25),
+            total_tokens: Some(40),
+            reasoning_tokens: Some(10),
+            cached_tokens: Some(3),
+        };
+        let result = &u1 + &u2;
+        assert_eq!(result.input_tokens, Some(25));
+        assert_eq!(result.output_tokens, Some(45));
+        assert_eq!(result.total_tokens, Some(70));
+        assert_eq!(result.reasoning_tokens, Some(15));
+        assert_eq!(result.cached_tokens, Some(5));
+    }
+
+    #[test]
+    fn test_usage_add_first_some_second_none() {
+        let u1 = Usage {
+            input_tokens: Some(10),
+            output_tokens: Some(20),
+            total_tokens: Some(30),
+            reasoning_tokens: Some(5),
+            cached_tokens: Some(2),
+        };
+        let u2 = Usage {
+            input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+            reasoning_tokens: None,
+            cached_tokens: None,
+        };
+        let result = &u1 + &u2;
+        assert_eq!(result.input_tokens, Some(10));
+        assert_eq!(result.output_tokens, Some(20));
+        assert_eq!(result.total_tokens, Some(30));
+        assert_eq!(result.reasoning_tokens, Some(5));
+        assert_eq!(result.cached_tokens, Some(2));
+    }
+
+    #[test]
+    fn test_usage_add_first_none_second_some() {
+        let u1 = Usage {
+            input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+            reasoning_tokens: None,
+            cached_tokens: None,
+        };
+        let u2 = Usage {
+            input_tokens: Some(15),
+            output_tokens: Some(25),
+            total_tokens: Some(40),
+            reasoning_tokens: Some(10),
+            cached_tokens: Some(3),
+        };
+        let result = &u1 + &u2;
+        assert_eq!(result.input_tokens, Some(15));
+        assert_eq!(result.output_tokens, Some(25));
+        assert_eq!(result.total_tokens, Some(40));
+        assert_eq!(result.reasoning_tokens, Some(10));
+        assert_eq!(result.cached_tokens, Some(3));
+    }
+
+    #[test]
+    fn test_usage_add_both_none() {
+        let u1 = Usage::default();
+        let u2 = Usage::default();
+        let result = &u1 + &u2;
+        assert_eq!(result.input_tokens, None);
+        assert_eq!(result.output_tokens, None);
+        assert_eq!(result.total_tokens, None);
+        assert_eq!(result.reasoning_tokens, None);
+        assert_eq!(result.cached_tokens, None);
+    }
+
+    #[test]
+    fn test_usage_add_mixed() {
+        let u1 = Usage {
+            input_tokens: Some(10),
+            output_tokens: None,
+            total_tokens: Some(30),
+            reasoning_tokens: None,
+            cached_tokens: Some(2),
+        };
+        let u2 = Usage {
+            input_tokens: None,
+            output_tokens: Some(25),
+            total_tokens: Some(40),
+            reasoning_tokens: Some(10),
+            cached_tokens: None,
+        };
+        let result = &u1 + &u2;
+        assert_eq!(result.input_tokens, Some(10));
+        assert_eq!(result.output_tokens, Some(25));
+        assert_eq!(result.total_tokens, Some(70));
+        assert_eq!(result.reasoning_tokens, Some(10));
+        assert_eq!(result.cached_tokens, Some(2));
+    }
+
+    #[test]
+    fn test_usage_add_zero_values() {
+        let u1 = Usage {
+            input_tokens: Some(0),
+            output_tokens: Some(0),
+            total_tokens: Some(0),
+            reasoning_tokens: Some(0),
+            cached_tokens: Some(0),
+        };
+        let u2 = Usage {
+            input_tokens: Some(0),
+            output_tokens: Some(0),
+            total_tokens: Some(0),
+            reasoning_tokens: Some(0),
+            cached_tokens: Some(0),
+        };
+        let result = &u1 + &u2;
+        assert_eq!(result.input_tokens, Some(0));
+        assert_eq!(result.output_tokens, Some(0));
+        assert_eq!(result.total_tokens, Some(0));
+        assert_eq!(result.reasoning_tokens, Some(0));
+        assert_eq!(result.cached_tokens, Some(0));
+    }
+
+    #[test]
+    fn test_step_usage() {
+        let messages = vec![
+            Message::Assistant(AssistantMessage {
+                content: LanguageModelResponseContentType::Text("Hello".to_string()),
+                usage: Some(Usage {
+                    input_tokens: Some(10),
+                    output_tokens: Some(5),
+                    total_tokens: Some(15),
+                    reasoning_tokens: Some(2),
+                    cached_tokens: Some(1),
+                }),
+            }),
+            Message::User("Hi".to_string().into()),
+            Message::Assistant(AssistantMessage {
+                content: LanguageModelResponseContentType::Text("How are you?".to_string()),
+                usage: Some(Usage {
+                    input_tokens: Some(5),
+                    output_tokens: Some(3),
+                    total_tokens: Some(8),
+                    reasoning_tokens: Some(1),
+                    cached_tokens: Some(0),
+                }),
+            }),
+        ];
+        let step = Step::new(1, messages);
+        let usage = step.usage();
+        assert_eq!(usage.input_tokens, Some(15));
+        assert_eq!(usage.output_tokens, Some(8));
+        assert_eq!(usage.total_tokens, Some(23));
+        assert_eq!(usage.reasoning_tokens, Some(3));
+        assert_eq!(usage.cached_tokens, Some(1));
+    }
+
+    #[test]
+    fn test_step_usage_no_assistant() {
+        let messages = vec![
+            Message::User("Hello".to_string().into()),
+            Message::System("System".to_string().into()),
+        ];
+        let step = Step::new(0, messages);
+        let usage = step.usage();
+        assert_eq!(usage, Usage::default());
+    }
+
+    #[test]
+    fn test_generate_text_response_step() {
+        let options = LanguageModelOptions {
+            messages: vec![
+                TaggedMessage::new(0, Message::System("System".to_string().into())),
+                TaggedMessage::new(0, Message::User("User".to_string().into())),
+                TaggedMessage::new(
+                    1,
+                    Message::Assistant(AssistantMessage {
+                        content: LanguageModelResponseContentType::Text("Assistant".to_string()),
+                        usage: None,
+                    }),
+                ),
+            ],
+            ..Default::default()
+        };
+        let response = GenerateTextResponse {
+            options,
+            model: None,
+            stop_reason: None,
+            usage: None,
+        };
+
+        let step0 = response.step(0).unwrap();
+        assert_eq!(step0.step_id, 0);
+        assert_eq!(step0.messages.len(), 2);
+
+        let step1 = response.step(1).unwrap();
+        assert_eq!(step1.step_id, 1);
+        assert_eq!(step1.messages.len(), 1);
+
+        assert!(response.step(2).is_none());
+    }
+
+    #[test]
+    fn test_generate_text_response_final_step() {
+        let options = LanguageModelOptions {
+            messages: vec![
+                TaggedMessage::new(0, Message::System("System".to_string().into())),
+                TaggedMessage::new(1, Message::User("User".to_string().into())),
+                TaggedMessage::new(
+                    2,
+                    Message::Assistant(AssistantMessage {
+                        content: LanguageModelResponseContentType::Text("Assistant".to_string()),
+                        usage: None,
+                    }),
+                ),
+            ],
+            ..Default::default()
+        };
+        let response = GenerateTextResponse {
+            options,
+            model: None,
+            stop_reason: None,
+            usage: None,
+        };
+
+        let final_step = response.last_step().unwrap();
+        assert_eq!(final_step.step_id, 2);
+        assert_eq!(final_step.messages.len(), 1);
+    }
+
+    #[test]
+    fn test_generate_text_response_steps() {
+        let options = LanguageModelOptions {
+            messages: vec![
+                TaggedMessage::new(0, Message::System("System".to_string().into())),
+                TaggedMessage::new(0, Message::User("User".to_string().into())),
+                TaggedMessage::new(
+                    1,
+                    Message::Assistant(AssistantMessage {
+                        content: LanguageModelResponseContentType::Text("Assistant1".to_string()),
+                        usage: None,
+                    }),
+                ),
+                TaggedMessage::new(
+                    2,
+                    Message::Assistant(AssistantMessage {
+                        content: LanguageModelResponseContentType::Text("Assistant2".to_string()),
+                        usage: None,
+                    }),
+                ),
+            ],
+            ..Default::default()
+        };
+        let response = GenerateTextResponse {
+            options,
+            model: None,
+            stop_reason: None,
+            usage: None,
+        };
+
+        let steps = response.steps();
+        assert_eq!(steps.len(), 3);
+        assert_eq!(steps[0].step_id, 0);
+        assert_eq!(steps[0].messages.len(), 2);
+        assert_eq!(steps[1].step_id, 1);
+        assert_eq!(steps[1].messages.len(), 1);
+        assert_eq!(steps[2].step_id, 2);
+        assert_eq!(steps[2].messages.len(), 1);
+    }
+
+    #[test]
+    fn test_generate_text_response_usage() {
+        let options = LanguageModelOptions {
+            messages: vec![
+                TaggedMessage::new(0, Message::System("System".to_string().into())),
+                TaggedMessage::new(
+                    1,
+                    Message::Assistant(AssistantMessage {
+                        content: LanguageModelResponseContentType::Text("Assistant1".to_string()),
+                        usage: Some(Usage {
+                            input_tokens: Some(10),
+                            output_tokens: Some(5),
+                            total_tokens: Some(15),
+                            reasoning_tokens: Some(2),
+                            cached_tokens: Some(1),
+                        }),
+                    }),
+                ),
+                TaggedMessage::new(
+                    2,
+                    Message::Assistant(AssistantMessage {
+                        content: LanguageModelResponseContentType::Text("Assistant2".to_string()),
+                        usage: Some(Usage {
+                            input_tokens: Some(5),
+                            output_tokens: Some(3),
+                            total_tokens: Some(8),
+                            reasoning_tokens: Some(1),
+                            cached_tokens: Some(0),
+                        }),
+                    }),
+                ),
+            ],
+            ..Default::default()
+        };
+        let response = GenerateTextResponse {
+            options,
+            model: None,
+            stop_reason: None,
+            usage: None,
+        };
+
+        let total_usage = response.usage();
+        assert_eq!(total_usage.input_tokens, Some(15));
+        assert_eq!(total_usage.output_tokens, Some(8));
+        assert_eq!(total_usage.total_tokens, Some(23));
+        assert_eq!(total_usage.reasoning_tokens, Some(3));
+        assert_eq!(total_usage.cached_tokens, Some(1));
     }
 }

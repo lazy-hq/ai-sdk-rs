@@ -1,13 +1,12 @@
 //! Helper functions and conversions for the OpenAI provider.
 
-use crate::core::language_model::LanguageModelOptions;
-use crate::core::messages::AssistantMessage;
+use crate::core::language_model::{LanguageModelOptions, LanguageModelResponseContentType, Usage};
 use crate::core::messages::Message;
 use crate::core::tools::Tool;
 use async_openai::types::ResponseFormatJsonSchema;
 use async_openai::types::responses::{
     CreateResponse, Function, Input, InputContent, InputItem, InputMessage, InputMessageType, Role,
-    TextConfig, TextResponseFormat, ToolDefinition,
+    TextConfig, TextResponseFormat, ToolDefinition, Usage as OpenAIUsage,
 };
 use schemars::Schema;
 use serde_json::Value;
@@ -37,7 +36,11 @@ impl From<Tool> for ToolDefinition {
 
 impl From<LanguageModelOptions> for CreateResponse {
     fn from(options: LanguageModelOptions) -> Self {
-        let mut items: Vec<InputItem> = options.messages.into_iter().map(|m| m.into()).collect();
+        let mut items: Vec<InputItem> = options
+            .messages
+            .into_iter()
+            .map(|m| m.message.into())
+            .collect();
 
         // system prompt first since openai likes it at the top
         if let Some(system) = options.system {
@@ -93,13 +96,13 @@ impl From<Message> for InputItem {
                 custom_msg["output"] = tool_info.output.clone();
                 InputItem::Custom(custom_msg)
             }
-            Message::Assistant(ref assistant_msg) => match assistant_msg {
-                AssistantMessage::Text(msg) => {
+            Message::Assistant(ref assistant_msg) => match &assistant_msg.content {
+                LanguageModelResponseContentType::Text(msg) => {
                     text_inp.role = Role::Assistant;
                     text_inp.content = InputContent::TextInput(msg.to_owned());
                     InputItem::Message(text_inp)
                 }
-                AssistantMessage::ToolCall(tool_info) => {
+                LanguageModelResponseContentType::ToolCall(tool_info) => {
                     let mut custom_msg = Value::Object(serde_json::Map::new());
                     custom_msg["arguments"] = Value::String(tool_info.input.to_string().clone());
                     custom_msg["call_id"] = Value::String(tool_info.tool.id.clone());
@@ -123,6 +126,20 @@ impl From<Message> for InputItem {
                 text_inp.content = InputContent::TextInput(d);
                 InputItem::Message(text_inp)
             }
+        }
+    }
+}
+
+impl From<OpenAIUsage> for Usage {
+    fn from(value: OpenAIUsage) -> Self {
+        Self {
+            input_tokens: Some(value.input_tokens as usize),
+            output_tokens: Some(value.output_tokens as usize),
+            total_tokens: Some(value.total_tokens as usize),
+            cached_tokens: Some(value.input_tokens_details.cached_tokens.unwrap_or(0) as usize),
+            reasoning_tokens: Some(
+                value.output_tokens_details.reasoning_tokens.unwrap_or(0) as usize
+            ),
         }
     }
 }
