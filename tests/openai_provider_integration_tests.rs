@@ -2,7 +2,7 @@
 
 use aisdk::{
     core::{
-        LanguageModelRequest, LanguageModelStreamChunkType, Message, tool,
+        LanguageModelRequest, LanguageModelStreamChunkType, Message, ResponseMethods, tool,
         tools::{Tool, ToolExecute},
     },
     providers::openai::OpenAI,

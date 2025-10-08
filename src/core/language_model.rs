@@ -70,23 +70,15 @@ pub trait LanguageModel: Send + Sync + std::fmt::Debug {
 }
 
 // ============================================================================
-// Section: structs and builders
+// Section: core function reponse types
 // ============================================================================
 
-/// A "step" represents a single cycle of model interaction.
-pub struct Step {
-    pub step_id: usize,
-    pub messages: Vec<Message>,
-}
+/// Common methods for types that contain collections of Messages
+pub trait StepMethods {
+    fn messages(&self) -> &[Message];
 
-impl Step {
-    pub fn new(step_id: usize, messages: Vec<Message>) -> Self {
-        Self { step_id, messages }
-    }
-
-    // total usage of a step
-    pub fn usage(&self) -> Usage {
-        self.messages
+    fn usage(&self) -> Usage {
+        self.messages()
             .iter()
             .filter_map(|m| match m {
                 Message::Assistant(AssistantMessage { usage, .. }) => usage.as_ref(),
@@ -95,9 +87,9 @@ impl Step {
             .fold(Usage::default(), |acc, u| &acc + u)
     }
 
-    pub fn tool_calls(&self) -> Option<Vec<ToolCallInfo>> {
+    fn tool_calls(&self) -> Option<Vec<ToolCallInfo>> {
         let calls: Vec<ToolCallInfo> = self
-            .messages
+            .messages()
             .iter()
             .filter_map(|msg| match msg {
                 Message::Assistant(AssistantMessage {
@@ -110,9 +102,9 @@ impl Step {
         if calls.is_empty() { None } else { Some(calls) }
     }
 
-    pub fn tool_results(&self) -> Option<Vec<ToolResultInfo>> {
+    fn tool_results(&self) -> Option<Vec<ToolResultInfo>> {
         let results: Vec<ToolResultInfo> = self
-            .messages
+            .messages()
             .iter()
             .filter_map(|msg| match msg {
                 Message::Tool(info) => Some(info.clone()),
@@ -124,6 +116,147 @@ impl Step {
         } else {
             Some(results)
         }
+    }
+}
+
+/// Helper trait for extracting messages from TaggedMessage collections
+trait TaggedMessageHelpers {
+    fn extract_tool_calls(&self) -> Option<Vec<ToolCallInfo>>;
+    fn extract_tool_results(&self) -> Option<Vec<ToolResultInfo>>;
+}
+
+impl TaggedMessageHelpers for [TaggedMessage] {
+    fn extract_tool_calls(&self) -> Option<Vec<ToolCallInfo>> {
+        let calls: Vec<ToolCallInfo> = self
+            .iter()
+            .filter_map(|msg| match msg.message {
+                Message::Assistant(AssistantMessage {
+                    content: LanguageModelResponseContentType::ToolCall(ref info),
+                    ..
+                }) => Some(info.clone()),
+                _ => None,
+            })
+            .collect();
+        if calls.is_empty() { None } else { Some(calls) }
+    }
+
+    fn extract_tool_results(&self) -> Option<Vec<ToolResultInfo>> {
+        let results: Vec<ToolResultInfo> = self
+            .iter()
+            .filter_map(|msg| match msg.message {
+                Message::Tool(ref info) => Some(info.clone()),
+                _ => None,
+            })
+            .collect();
+        if results.is_empty() {
+            None
+        } else {
+            Some(results)
+        }
+    }
+}
+
+/// Common methods for response types that contain LanguageModelOptions
+pub trait ResponseMethods {
+    fn options(&self) -> &LanguageModelOptions;
+
+    fn step(&self, index: usize) -> Option<Step> {
+        let messages: Vec<Message> = self
+            .options()
+            .messages
+            .iter()
+            .filter(|t| t.step_id == index)
+            .map(|t| t.message.clone())
+            .collect();
+        if messages.is_empty() {
+            None
+        } else {
+            Some(Step::new(index, messages))
+        }
+    }
+
+    fn last_step(&self) -> Option<Step> {
+        let max_step = self.options().messages.iter().map(|t| t.step_id).max()?;
+        self.step(max_step)
+    }
+
+    fn steps(&self) -> Vec<Step> {
+        let mut step_map: HashMap<usize, Vec<Message>> = HashMap::new();
+        for tagged in &self.options().messages {
+            step_map
+                .entry(tagged.step_id)
+                .or_default()
+                .push(tagged.message.clone());
+        }
+        let mut steps: Vec<Step> = step_map
+            .into_iter()
+            .map(|(id, msgs)| Step::new(id, msgs))
+            .collect();
+        steps.sort_by_key(|s| s.step_id);
+        steps
+    }
+
+    fn usage(&self) -> Usage {
+        self.steps()
+            .iter()
+            .map(|s| s.usage())
+            .fold(Usage::default(), |acc, u| &acc + &u)
+    }
+
+    fn content(&self) -> Option<&LanguageModelResponseContentType> {
+        if let Some(msg) = self.options().messages.last() {
+            match msg.message {
+                Message::Assistant(ref content) => Some(&content.content),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    fn text(&self) -> Option<&String> {
+        if let Some(msg) = self.options().messages.last() {
+            match msg.message {
+                Message::Assistant(AssistantMessage {
+                    content: LanguageModelResponseContentType::Text(ref c),
+                    ..
+                }) => Some(c),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    fn tool_results(&self) -> Option<Vec<ToolResultInfo>> {
+        self.options().messages.as_slice().extract_tool_results()
+    }
+
+    fn tool_calls(&self) -> Option<Vec<ToolCallInfo>> {
+        self.options().messages.as_slice().extract_tool_calls()
+    }
+}
+
+// ============================================================================
+// Section: structs and builders
+// ============================================================================
+
+/// A "step" represents a single cycle of model interaction.
+pub struct Step {
+    pub step_id: usize,
+    pub messages: Vec<Message>,
+}
+
+// TODO: explore options to use traits
+impl Step {
+    pub fn new(step_id: usize, messages: Vec<Message>) -> Self {
+        Self { step_id, messages }
+    }
+}
+
+impl StepMethods for Step {
+    fn messages(&self) -> &[Message] {
+        &self.messages
     }
 }
 
@@ -553,10 +686,6 @@ impl<M: LanguageModel> LanguageModelRequestBuilder<M, OptionsStage> {
     }
 }
 
-// ============================================================================
-// Section: core function reponse types
-// ============================================================================
-
 //TODO: add standard response fields
 /// Response from a generate call on `GenerateText`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -588,89 +717,12 @@ impl GenerateTextResponse {
     pub fn step_ids(&self) -> Vec<usize> {
         self.options.messages.iter().map(|t| t.step_id).collect()
     }
+}
 
-    // A specific step
-    pub fn step(&self, index: usize) -> Option<Step> {
-        let messages: Vec<Message> = self
-            .options
-            .messages
-            .iter()
-            .filter(|t| t.step_id == index)
-            .map(|t| t.message.clone())
-            .collect();
-        if messages.is_empty() {
-            None
-        } else {
-            Some(Step::new(index, messages))
-        }
+impl ResponseMethods for GenerateTextResponse {
+    fn options(&self) -> &LanguageModelOptions {
+        &self.options
     }
-
-    // The final step
-    pub fn last_step(&self) -> Option<Step> {
-        let max_step = self.options.messages.iter().map(|t| t.step_id).max()?;
-        self.step(max_step)
-    }
-
-    // All the steps
-    pub fn steps(&self) -> Vec<Step> {
-        let mut step_map: HashMap<usize, Vec<Message>> = HashMap::new();
-        for tagged in &self.options.messages {
-            step_map
-                .entry(tagged.step_id)
-                .or_default()
-                .push(tagged.message.clone());
-        }
-        let mut steps: Vec<Step> = step_map
-            .into_iter()
-            .map(|(id, msgs)| Step::new(id, msgs))
-            .collect();
-        steps.sort_by_key(|s| s.step_id);
-        steps
-    }
-
-    // Total usage
-    pub fn usage(&self) -> Usage {
-        self.steps()
-            .iter()
-            .map(|s| s.usage())
-            .fold(Usage::default(), |acc, u| &acc + &u)
-    }
-
-    // TODO: incomplete code
-    /// The last content of the response
-    pub fn content(&self) -> Option<&LanguageModelResponseContentType> {
-        if let Some(msg) = self.options.messages.last() {
-            match msg.message {
-                Message::Assistant(ref content) => Some(&content.content),
-                _ => None,
-            }
-        } else {
-            None
-        }
-    }
-
-    // TODO: incomplete code
-    /// The last text content of the response. returns None if the last
-    /// returned content is not a text.
-    pub fn text(&self) -> Option<&String> {
-        if let Some(msg) = self.options.messages.last() {
-            match msg.message {
-                Message::Assistant(AssistantMessage {
-                    content: LanguageModelResponseContentType::Text(ref c),
-                    ..
-                }) => Some(c),
-                _ => None,
-            }
-        } else {
-            None
-        }
-    }
-
-    pub fn tool_results(&self) -> Option<Vec<ToolResultInfo>> {
-        todo!("The tool results")
-    }
-    // TODO: Everything that needs to be extracted from the last step
-    // should go here ..
 }
 
 // TODO: add standard response fields
@@ -685,8 +737,15 @@ pub struct StreamTextResponse {
 }
 
 impl StreamTextResponse {
+    #[cfg(any(test, feature = "test-access"))]
     pub fn step_ids(&self) -> Vec<usize> {
         self.options.messages.iter().map(|t| t.step_id).collect()
+    }
+}
+
+impl ResponseMethods for StreamTextResponse {
+    fn options(&self) -> &LanguageModelOptions {
+        &self.options
     }
 }
 
@@ -1413,7 +1472,7 @@ mod tests {
         let mut messages = Vec::new();
         // Add 1000 messages with tool results interspersed
         for i in 0..1000 {
-            messages.push(Message::Tool(ToolResultInfo::new(&format!("tool{}", i))));
+            messages.push(Message::Tool(ToolResultInfo::new(format!("tool{i}"))));
             if i % 100 == 0 {
                 messages.push(Message::User(format!("User message {}", i).into()));
             }
@@ -1424,5 +1483,657 @@ mod tests {
         for (i, result) in results.iter().enumerate() {
             assert_eq!(result.tool.name, format!("tool{}", i));
         }
+    }
+
+    // Helper functions for GenerateTextResponse tests
+    fn create_tool_call_message(step_id: usize, tool_name: &str) -> TaggedMessage {
+        TaggedMessage::new(
+            step_id,
+            Message::Assistant(AssistantMessage {
+                content: LanguageModelResponseContentType::ToolCall(ToolCallInfo::new(tool_name)),
+                usage: None,
+            }),
+        )
+    }
+
+    fn create_tool_result_message(step_id: usize, tool_name: &str) -> TaggedMessage {
+        TaggedMessage::new(step_id, Message::Tool(ToolResultInfo::new(tool_name)))
+    }
+
+    fn create_text_assistant_message(step_id: usize, text: &str) -> TaggedMessage {
+        TaggedMessage::new(
+            step_id,
+            Message::Assistant(AssistantMessage {
+                content: LanguageModelResponseContentType::Text(text.to_string()),
+                usage: None,
+            }),
+        )
+    }
+
+    fn create_response_with_messages(messages: Vec<TaggedMessage>) -> GenerateTextResponse {
+        let options = LanguageModelOptions {
+            messages,
+            ..Default::default()
+        };
+        GenerateTextResponse {
+            options,
+            model: None,
+            stop_reason: None,
+            usage: None,
+        }
+    }
+
+    fn create_stream_response_with_messages(messages: Vec<TaggedMessage>) -> StreamTextResponse {
+        let options = LanguageModelOptions {
+            messages,
+            ..Default::default()
+        };
+        let (_tx, stream) = MpmcStream::new();
+        StreamTextResponse {
+            stream,
+            model: None,
+            options,
+        }
+    }
+
+    // Tests for GenerateTextResponse tool_calls()
+    #[test]
+    fn test_generate_text_response_tool_calls_empty_messages() {
+        let response = create_response_with_messages(vec![]);
+        assert_eq!(response.tool_calls(), None);
+    }
+
+    #[test]
+    fn test_generate_text_response_tool_calls_only_non_assistant_messages() {
+        let messages = vec![
+            TaggedMessage::new(0, Message::System("System".to_string().into())),
+            TaggedMessage::new(0, Message::User("User".to_string().into())),
+            create_tool_result_message(0, "tool1"),
+        ];
+        let response = create_response_with_messages(messages);
+        assert_eq!(response.tool_calls(), None);
+    }
+
+    #[test]
+    fn test_generate_text_response_tool_calls_single_assistant_with_tool_call() {
+        let messages = vec![create_tool_call_message(0, "test_tool")];
+        let response = create_response_with_messages(messages);
+        let calls = response.tool_calls().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].tool.name, "test_tool");
+    }
+
+    #[test]
+    fn test_generate_text_response_tool_calls_multiple_assistant_with_tool_calls_different_steps() {
+        let messages = vec![
+            create_tool_call_message(0, "tool1"),
+            create_tool_call_message(1, "tool2"),
+            create_tool_call_message(2, "tool3"),
+        ];
+        let response = create_response_with_messages(messages);
+        let calls = response.tool_calls().unwrap();
+        assert_eq!(calls.len(), 3);
+        assert_eq!(calls[0].tool.name, "tool1");
+        assert_eq!(calls[1].tool.name, "tool2");
+        assert_eq!(calls[2].tool.name, "tool3");
+    }
+
+    #[test]
+    fn test_generate_text_response_tool_calls_assistant_without_tool_call() {
+        let messages = vec![create_text_assistant_message(0, "Hello")];
+        let response = create_response_with_messages(messages);
+        assert_eq!(response.tool_calls(), None);
+    }
+
+    #[test]
+    fn test_generate_text_response_tool_calls_mixed_message_types_multiple_steps() {
+        let messages = vec![
+            TaggedMessage::new(0, Message::System("System".to_string().into())),
+            TaggedMessage::new(0, Message::User("User".to_string().into())),
+            create_tool_call_message(1, "test_tool"),
+            create_tool_result_message(1, "other_tool"),
+            create_tool_call_message(2, "another_tool"),
+        ];
+        let response = create_response_with_messages(messages);
+        let calls = response.tool_calls().unwrap();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].tool.name, "test_tool");
+        assert_eq!(calls[1].tool.name, "another_tool");
+    }
+
+    #[test]
+    fn test_generate_text_response_tool_calls_duplicate_tool_calls() {
+        let messages = vec![
+            create_tool_call_message(0, "tool1"),
+            create_tool_call_message(1, "tool1"), // Same name
+            create_tool_call_message(2, "tool1"), // Same name again
+        ];
+        let response = create_response_with_messages(messages);
+        let calls = response.tool_calls().unwrap();
+        assert_eq!(calls.len(), 3);
+        assert_eq!(calls[0].tool.name, "tool1");
+        assert_eq!(calls[1].tool.name, "tool1");
+        assert_eq!(calls[2].tool.name, "tool1");
+    }
+
+    #[test]
+    fn test_generate_text_response_tool_calls_from_specific_steps_only() {
+        let messages = vec![
+            TaggedMessage::new(0, Message::System("System".to_string().into())),
+            create_tool_call_message(1, "tool_from_step1"),
+            TaggedMessage::new(1, Message::User("User".to_string().into())),
+            create_tool_call_message(2, "tool_from_step2"),
+            create_tool_result_message(2, "result_from_step2"),
+            create_tool_call_message(3, "tool_from_step3"),
+        ];
+        let response = create_response_with_messages(messages);
+        let calls = response.tool_calls().unwrap();
+        assert_eq!(calls.len(), 3);
+        assert_eq!(calls[0].tool.name, "tool_from_step1");
+        assert_eq!(calls[1].tool.name, "tool_from_step2");
+        assert_eq!(calls[2].tool.name, "tool_from_step3");
+    }
+
+    // Tests for GenerateTextResponse tool_results()
+    #[test]
+    fn test_generate_text_response_tool_results_empty_messages() {
+        let response = create_response_with_messages(vec![]);
+        assert_eq!(response.tool_results(), None);
+    }
+
+    #[test]
+    fn test_generate_text_response_tool_results_only_non_tool_messages() {
+        let messages = vec![
+            TaggedMessage::new(0, Message::System("System".to_string().into())),
+            TaggedMessage::new(0, Message::User("User".to_string().into())),
+            create_text_assistant_message(0, "Assistant"),
+        ];
+        let response = create_response_with_messages(messages);
+        assert_eq!(response.tool_results(), None);
+    }
+
+    #[test]
+    fn test_generate_text_response_tool_results_single_tool_message() {
+        let messages = vec![create_tool_result_message(0, "test_tool")];
+        let response = create_response_with_messages(messages);
+        let results = response.tool_results().unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].tool.name, "test_tool");
+    }
+
+    #[test]
+    fn test_generate_text_response_tool_results_multiple_tool_messages_different_steps() {
+        let messages = vec![
+            create_tool_result_message(0, "tool1"),
+            create_tool_result_message(1, "tool2"),
+            create_tool_result_message(2, "tool3"),
+        ];
+        let response = create_response_with_messages(messages);
+        let results = response.tool_results().unwrap();
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].tool.name, "tool1");
+        assert_eq!(results[1].tool.name, "tool2");
+        assert_eq!(results[2].tool.name, "tool3");
+    }
+
+    #[test]
+    fn test_generate_text_response_tool_results_mixed_message_types() {
+        let messages = vec![
+            TaggedMessage::new(0, Message::System("System".to_string().into())),
+            TaggedMessage::new(0, Message::User("User".to_string().into())),
+            create_tool_result_message(1, "test_tool"),
+            create_text_assistant_message(1, "Assistant"),
+            create_tool_result_message(2, "another_tool"),
+        ];
+        let response = create_response_with_messages(messages);
+        let results = response.tool_results().unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].tool.name, "test_tool");
+        assert_eq!(results[1].tool.name, "another_tool");
+    }
+
+    #[test]
+    fn test_generate_text_response_tool_results_no_tool_messages_but_others_present() {
+        let messages = vec![
+            TaggedMessage::new(0, Message::System("System".to_string().into())),
+            TaggedMessage::new(0, Message::User("User".to_string().into())),
+            create_text_assistant_message(0, "Assistant"),
+        ];
+        let response = create_response_with_messages(messages);
+        assert_eq!(response.tool_results(), None);
+    }
+
+    #[test]
+    fn test_generate_text_response_tool_results_duplicate_tool_entries() {
+        let messages = vec![
+            create_tool_result_message(0, "tool1"),
+            create_tool_result_message(1, "tool1"), // Same name
+            create_tool_result_message(2, "tool1"), // Same name again
+        ];
+        let response = create_response_with_messages(messages);
+        let results = response.tool_results().unwrap();
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].tool.name, "tool1");
+        assert_eq!(results[1].tool.name, "tool1");
+        assert_eq!(results[2].tool.name, "tool1");
+    }
+
+    #[test]
+    fn test_generate_text_response_tool_results_preserving_original_message_order() {
+        let messages = vec![
+            TaggedMessage::new(0, Message::System("System".to_string().into())),
+            create_tool_result_message(1, "tool1"),
+            TaggedMessage::new(1, Message::User("User".to_string().into())),
+            create_tool_result_message(2, "tool2"),
+            create_text_assistant_message(2, "Assistant"),
+            create_tool_result_message(3, "tool3"),
+        ];
+        let response = create_response_with_messages(messages);
+        let results = response.tool_results().unwrap();
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].tool.name, "tool1");
+        assert_eq!(results[1].tool.name, "tool2");
+        assert_eq!(results[2].tool.name, "tool3");
+    }
+
+    #[test]
+    fn test_generate_text_response_tool_results_large_number_of_messages() {
+        let mut messages = Vec::new();
+        // Add 1000 messages with tool results interspersed
+        for i in 0..1000 {
+            messages.push(create_tool_result_message(0, &format!("tool{}", i)));
+            if i % 100 == 0 {
+                messages.push(TaggedMessage::new(
+                    0,
+                    Message::User(format!("User message {}", i).into()),
+                ));
+            }
+        }
+        let response = create_response_with_messages(messages);
+        let results = response.tool_results().unwrap();
+        assert_eq!(results.len(), 1000);
+        for (i, result) in results.iter().enumerate() {
+            assert_eq!(result.tool.name, format!("tool{}", i));
+        }
+    }
+
+    // Tests for StreamTextResponse tool_calls()
+    #[test]
+    fn test_stream_text_response_tool_calls_empty_messages() {
+        let response = create_stream_response_with_messages(vec![]);
+        assert_eq!(response.tool_calls(), None);
+    }
+
+    #[test]
+    fn test_stream_text_response_tool_calls_only_non_assistant_messages() {
+        let messages = vec![
+            TaggedMessage::new(0, Message::System("System".to_string().into())),
+            TaggedMessage::new(0, Message::User("User".to_string().into())),
+            create_tool_result_message(0, "tool1"),
+        ];
+        let response = create_stream_response_with_messages(messages);
+        assert_eq!(response.tool_calls(), None);
+    }
+
+    #[test]
+    fn test_stream_text_response_tool_calls_single_assistant_with_tool_call() {
+        let messages = vec![create_tool_call_message(0, "test_tool")];
+        let response = create_stream_response_with_messages(messages);
+        let calls = response.tool_calls().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].tool.name, "test_tool");
+    }
+
+    #[test]
+    fn test_stream_text_response_tool_calls_multiple_assistant_with_tool_calls_different_steps() {
+        let messages = vec![
+            create_tool_call_message(0, "tool1"),
+            create_tool_call_message(1, "tool2"),
+            create_tool_call_message(2, "tool3"),
+        ];
+        let response = create_stream_response_with_messages(messages);
+        let calls = response.tool_calls().unwrap();
+        assert_eq!(calls.len(), 3);
+        assert_eq!(calls[0].tool.name, "tool1");
+        assert_eq!(calls[1].tool.name, "tool2");
+        assert_eq!(calls[2].tool.name, "tool3");
+    }
+
+    #[test]
+    fn test_stream_text_response_tool_calls_assistant_without_tool_call() {
+        let messages = vec![create_text_assistant_message(0, "Hello")];
+        let response = create_stream_response_with_messages(messages);
+        assert_eq!(response.tool_calls(), None);
+    }
+
+    #[test]
+    fn test_stream_text_response_tool_calls_mixed_message_types_multiple_steps() {
+        let messages = vec![
+            TaggedMessage::new(0, Message::System("System".to_string().into())),
+            TaggedMessage::new(0, Message::User("User".to_string().into())),
+            create_tool_call_message(1, "test_tool"),
+            create_tool_result_message(1, "other_tool"),
+            create_tool_call_message(2, "another_tool"),
+        ];
+        let response = create_stream_response_with_messages(messages);
+        let calls = response.tool_calls().unwrap();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].tool.name, "test_tool");
+        assert_eq!(calls[1].tool.name, "another_tool");
+    }
+
+    #[test]
+    fn test_stream_text_response_tool_calls_duplicate_tool_calls() {
+        let messages = vec![
+            create_tool_call_message(0, "tool1"),
+            create_tool_call_message(1, "tool1"), // Same name
+            create_tool_call_message(2, "tool1"), // Same name again
+        ];
+        let response = create_stream_response_with_messages(messages);
+        let calls = response.tool_calls().unwrap();
+        assert_eq!(calls.len(), 3);
+        assert_eq!(calls[0].tool.name, "tool1");
+        assert_eq!(calls[1].tool.name, "tool1");
+        assert_eq!(calls[2].tool.name, "tool1");
+    }
+
+    #[test]
+    fn test_stream_text_response_tool_calls_from_specific_steps_only() {
+        let messages = vec![
+            TaggedMessage::new(0, Message::System("System".to_string().into())),
+            create_tool_call_message(1, "tool_from_step1"),
+            TaggedMessage::new(1, Message::User("User".to_string().into())),
+            create_tool_call_message(2, "tool_from_step2"),
+            create_tool_result_message(2, "result_from_step2"),
+            create_tool_call_message(3, "tool_from_step3"),
+        ];
+        let response = create_stream_response_with_messages(messages);
+        let calls = response.tool_calls().unwrap();
+        assert_eq!(calls.len(), 3);
+        assert_eq!(calls[0].tool.name, "tool_from_step1");
+        assert_eq!(calls[1].tool.name, "tool_from_step2");
+        assert_eq!(calls[2].tool.name, "tool_from_step3");
+    }
+
+    // Tests for StreamTextResponse tool_results()
+    #[test]
+    fn test_stream_text_response_tool_results_empty_messages() {
+        let response = create_stream_response_with_messages(vec![]);
+        assert_eq!(response.tool_results(), None);
+    }
+
+    #[test]
+    fn test_stream_text_response_tool_results_only_non_tool_messages() {
+        let messages = vec![
+            TaggedMessage::new(0, Message::System("System".to_string().into())),
+            TaggedMessage::new(0, Message::User("User".to_string().into())),
+            create_text_assistant_message(0, "Assistant"),
+        ];
+        let response = create_stream_response_with_messages(messages);
+        assert_eq!(response.tool_results(), None);
+    }
+
+    #[test]
+    fn test_stream_text_response_tool_results_single_tool_message() {
+        let messages = vec![create_tool_result_message(0, "test_tool")];
+        let response = create_stream_response_with_messages(messages);
+        let results = response.tool_results().unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].tool.name, "test_tool");
+    }
+
+    #[test]
+    fn test_stream_text_response_tool_results_multiple_tool_messages_different_steps() {
+        let messages = vec![
+            create_tool_result_message(0, "tool1"),
+            create_tool_result_message(1, "tool2"),
+            create_tool_result_message(2, "tool3"),
+        ];
+        let response = create_stream_response_with_messages(messages);
+        let results = response.tool_results().unwrap();
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].tool.name, "tool1");
+        assert_eq!(results[1].tool.name, "tool2");
+        assert_eq!(results[2].tool.name, "tool3");
+    }
+
+    #[test]
+    fn test_stream_text_response_tool_results_mixed_message_types() {
+        let messages = vec![
+            TaggedMessage::new(0, Message::System("System".to_string().into())),
+            TaggedMessage::new(0, Message::User("User".to_string().into())),
+            create_tool_result_message(1, "test_tool"),
+            create_text_assistant_message(1, "Assistant"),
+            create_tool_result_message(2, "another_tool"),
+        ];
+        let response = create_stream_response_with_messages(messages);
+        let results = response.tool_results().unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].tool.name, "test_tool");
+        assert_eq!(results[1].tool.name, "another_tool");
+    }
+
+    #[test]
+    fn test_stream_text_response_tool_results_no_tool_messages_but_others_present() {
+        let messages = vec![
+            TaggedMessage::new(0, Message::System("System".to_string().into())),
+            TaggedMessage::new(0, Message::User("User".to_string().into())),
+            create_text_assistant_message(0, "Assistant"),
+        ];
+        let response = create_stream_response_with_messages(messages);
+        assert_eq!(response.tool_results(), None);
+    }
+
+    #[test]
+    fn test_stream_text_response_tool_results_duplicate_tool_entries() {
+        let messages = vec![
+            create_tool_result_message(0, "tool1"),
+            create_tool_result_message(1, "tool1"), // Same name
+            create_tool_result_message(2, "tool1"), // Same name again
+        ];
+        let response = create_stream_response_with_messages(messages);
+        let results = response.tool_results().unwrap();
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].tool.name, "tool1");
+        assert_eq!(results[1].tool.name, "tool1");
+        assert_eq!(results[2].tool.name, "tool1");
+    }
+
+    #[test]
+    fn test_stream_text_response_tool_results_preserving_original_message_order() {
+        let messages = vec![
+            TaggedMessage::new(0, Message::System("System".to_string().into())),
+            create_tool_result_message(1, "tool1"),
+            TaggedMessage::new(1, Message::User("User".to_string().into())),
+            create_tool_result_message(2, "tool2"),
+            create_text_assistant_message(2, "Assistant"),
+            create_tool_result_message(3, "tool3"),
+        ];
+        let response = create_stream_response_with_messages(messages);
+        let results = response.tool_results().unwrap();
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].tool.name, "tool1");
+        assert_eq!(results[1].tool.name, "tool2");
+        assert_eq!(results[2].tool.name, "tool3");
+    }
+
+    #[test]
+    fn test_stream_text_response_tool_results_large_number_of_messages() {
+        let mut messages = Vec::new();
+        // Add 1000 messages with tool results interspersed
+        for i in 0..1000 {
+            messages.push(create_tool_result_message(0, &format!("tool{}", i)));
+            if i % 100 == 0 {
+                messages.push(TaggedMessage::new(
+                    0,
+                    Message::User(format!("User message {}", i).into()),
+                ));
+            }
+        }
+        let response = create_stream_response_with_messages(messages);
+        let results = response.tool_results().unwrap();
+        assert_eq!(results.len(), 1000);
+        for (i, result) in results.iter().enumerate() {
+            assert_eq!(result.tool.name, format!("tool{}", i));
+        }
+    }
+
+    // Tests for StreamTextResponse step(), last_step(), steps(), usage(), content(), text()
+    #[test]
+    fn test_stream_text_response_step() {
+        let messages = vec![
+            TaggedMessage::new(0, Message::System("System".to_string().into())),
+            TaggedMessage::new(0, Message::User("User".to_string().into())),
+            TaggedMessage::new(
+                1,
+                Message::Assistant(AssistantMessage {
+                    content: LanguageModelResponseContentType::Text("Assistant".to_string()),
+                    usage: None,
+                }),
+            ),
+        ];
+        let response = create_stream_response_with_messages(messages);
+
+        let step0 = response.step(0).unwrap();
+        assert_eq!(step0.step_id, 0);
+        assert_eq!(step0.messages.len(), 2);
+
+        let step1 = response.step(1).unwrap();
+        assert_eq!(step1.step_id, 1);
+        assert_eq!(step1.messages.len(), 1);
+
+        assert!(response.step(2).is_none());
+    }
+
+    #[test]
+    fn test_stream_text_response_last_step() {
+        let messages = vec![
+            TaggedMessage::new(0, Message::System("System".to_string().into())),
+            TaggedMessage::new(1, Message::User("User".to_string().into())),
+            TaggedMessage::new(
+                2,
+                Message::Assistant(AssistantMessage {
+                    content: LanguageModelResponseContentType::Text("Assistant".to_string()),
+                    usage: None,
+                }),
+            ),
+        ];
+        let response = create_stream_response_with_messages(messages);
+
+        let final_step = response.last_step().unwrap();
+        assert_eq!(final_step.step_id, 2);
+        assert_eq!(final_step.messages.len(), 1);
+    }
+
+    #[test]
+    fn test_stream_text_response_steps() {
+        let messages = vec![
+            TaggedMessage::new(0, Message::System("System".to_string().into())),
+            TaggedMessage::new(0, Message::User("User".to_string().into())),
+            TaggedMessage::new(
+                1,
+                Message::Assistant(AssistantMessage {
+                    content: LanguageModelResponseContentType::Text("Assistant1".to_string()),
+                    usage: None,
+                }),
+            ),
+            TaggedMessage::new(
+                2,
+                Message::Assistant(AssistantMessage {
+                    content: LanguageModelResponseContentType::Text("Assistant2".to_string()),
+                    usage: None,
+                }),
+            ),
+        ];
+        let response = create_stream_response_with_messages(messages);
+
+        let steps = response.steps();
+        assert_eq!(steps.len(), 3);
+        assert_eq!(steps[0].step_id, 0);
+        assert_eq!(steps[0].messages.len(), 2);
+        assert_eq!(steps[1].step_id, 1);
+        assert_eq!(steps[1].messages.len(), 1);
+        assert_eq!(steps[2].step_id, 2);
+        assert_eq!(steps[2].messages.len(), 1);
+    }
+
+    #[test]
+    fn test_stream_text_response_usage() {
+        let messages = vec![
+            TaggedMessage::new(0, Message::System("System".to_string().into())),
+            TaggedMessage::new(
+                1,
+                Message::Assistant(AssistantMessage {
+                    content: LanguageModelResponseContentType::Text("Assistant1".to_string()),
+                    usage: Some(Usage {
+                        input_tokens: Some(10),
+                        output_tokens: Some(5),
+                        total_tokens: Some(15),
+                        reasoning_tokens: Some(2),
+                        cached_tokens: Some(1),
+                    }),
+                }),
+            ),
+            TaggedMessage::new(
+                2,
+                Message::Assistant(AssistantMessage {
+                    content: LanguageModelResponseContentType::Text("Assistant2".to_string()),
+                    usage: Some(Usage {
+                        input_tokens: Some(5),
+                        output_tokens: Some(3),
+                        total_tokens: Some(8),
+                        reasoning_tokens: Some(1),
+                        cached_tokens: Some(0),
+                    }),
+                }),
+            ),
+        ];
+        let response = create_stream_response_with_messages(messages);
+
+        let total_usage = response.usage();
+        assert_eq!(total_usage.input_tokens, Some(15));
+        assert_eq!(total_usage.output_tokens, Some(8));
+        assert_eq!(total_usage.total_tokens, Some(23));
+        assert_eq!(total_usage.reasoning_tokens, Some(3));
+        assert_eq!(total_usage.cached_tokens, Some(1));
+    }
+
+    #[test]
+    fn test_stream_text_response_content() {
+        let messages = vec![
+            TaggedMessage::new(0, Message::System("System".to_string().into())),
+            TaggedMessage::new(
+                1,
+                Message::Assistant(AssistantMessage {
+                    content: LanguageModelResponseContentType::Text("Last message".to_string()),
+                    usage: None,
+                }),
+            ),
+        ];
+        let response = create_stream_response_with_messages(messages);
+
+        let content = response.content().unwrap();
+        match content {
+            LanguageModelResponseContentType::Text(text) => assert_eq!(text, "Last message"),
+            _ => panic!("Expected text content"),
+        }
+    }
+
+    #[test]
+    fn test_stream_text_response_text() {
+        let messages = vec![
+            TaggedMessage::new(0, Message::System("System".to_string().into())),
+            TaggedMessage::new(
+                1,
+                Message::Assistant(AssistantMessage {
+                    content: LanguageModelResponseContentType::Text("Last text".to_string()),
+                    usage: None,
+                }),
+            ),
+        ];
+        let response = create_stream_response_with_messages(messages);
+
+        let text = response.text().unwrap();
+        assert_eq!(text, "Last text");
     }
 }
