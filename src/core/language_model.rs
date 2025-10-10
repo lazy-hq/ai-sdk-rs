@@ -20,9 +20,11 @@ use serde::de::DeserializeOwned;
 use serde::ser::Error as SerdeError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::ops::Add;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
+use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::task::{Context, Poll};
 
@@ -30,6 +32,14 @@ use std::task::{Context, Poll};
 // Section: constants
 // ============================================================================
 pub const DEFAULT_TOOL_STEP_COUNT: usize = 3;
+
+// ============================================================================
+// Section: hook types
+// ============================================================================
+
+pub type StopWhenHook = Arc<dyn Fn(&LanguageModelOptions) -> bool + Send + Sync>;
+pub type PrepareStepHook = Arc<dyn Fn(&mut LanguageModelOptions) + Send + Sync>;
+pub type OnStepFinishHook = Arc<dyn Fn(&LanguageModelOptions) + Send + Sync>;
 
 // ============================================================================
 // Section: traits
@@ -261,7 +271,7 @@ impl StepMethods for Step {
 }
 
 /// Options for a language model request.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, Builder)]
+#[derive(Clone, Default, Builder, Serialize, Deserialize)]
 #[builder(pattern = "owned", setter(into), build_fn(error = "Error"))]
 pub struct LanguageModelOptions {
     /// System prompt to be used for the request.
@@ -313,10 +323,42 @@ pub struct LanguageModelOptions {
 
     /// Used to track message steps
     pub(crate) current_step_id: usize,
-    // Additional provider-specific options. They are passed through
-    // to the provider from the AI SDK and enable provider-specific functionality.
-    //TODO: add support for provider options
-    //pub provider_options: <HashMap<String, <HashMap<String, JsonValue>>>>,
+
+    /// Hook to stop tool calling if returns true
+    #[serde(skip)]
+    pub stop_when: Option<StopWhenHook>,
+    /// Hook called before each step (language model request)
+    #[serde(skip)]
+    pub prepare_step: Option<PrepareStepHook>,
+
+    /// Hook called after each step finishes
+    #[serde(skip)]
+    pub on_step_finish: Option<OnStepFinishHook>,
+}
+
+impl Debug for LanguageModelOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LanguageModelOptions")
+            .field("system", &self.system)
+            .field("messages", &self.messages)
+            .field("schema", &self.schema)
+            .field("seed", &self.seed)
+            .field("temperature", &self.temperature)
+            .field("top_p", &self.top_p)
+            .field("top_k", &self.top_k)
+            .field("max_retries", &self.max_retries)
+            .field("max_output_tokens", &self.max_output_tokens)
+            .field("stop_sequences", &self.stop_sequences)
+            .field("presence_penalty", &self.presence_penalty)
+            .field("frequency_penalty", &self.frequency_penalty)
+            .field("step_count", &self.step_count)
+            .field("tools", &self.tools)
+            .field("current_step_id", &self.current_step_id)
+            .field("stop_when", &self.stop_when.is_some())
+            .field("prepare_step", &self.prepare_step.is_some())
+            .field("on_step_finish", &self.on_step_finish.is_some())
+            .finish()
+    }
 }
 
 impl LanguageModelOptions {
@@ -673,6 +715,30 @@ impl<M: LanguageModel> LanguageModelRequestBuilder<M, OptionsStage> {
         self
     }
 
+    pub fn stop_when<F>(mut self, hook: F) -> Self
+    where
+        F: Fn(&LanguageModelOptions) -> bool + Send + Sync + 'static,
+    {
+        self.stop_when = Some(Arc::new(hook));
+        self
+    }
+
+    pub fn prepare_step<F>(mut self, hook: F) -> Self
+    where
+        F: Fn(&mut LanguageModelOptions) + Send + Sync + 'static,
+    {
+        self.prepare_step = Some(Arc::new(hook));
+        self
+    }
+
+    pub fn on_step_finish<F>(mut self, hook: F) -> Self
+    where
+        F: Fn(&LanguageModelOptions) + Send + Sync + 'static,
+    {
+        self.on_step_finish = Some(Arc::new(hook));
+        self
+    }
+
     pub fn build(self) -> LanguageModelRequest<M> {
         let model = self
             .model
@@ -769,22 +835,31 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
             schema: self.options.schema.to_owned(),
             stop_sequences: self.options.stop_sequences.to_owned(),
             tools: self.options.tools.to_owned(),
+            stop_when: self.options.stop_when.clone(),
+            prepare_step: self.options.prepare_step.clone(),
+            on_step_finish: self.options.on_step_finish.clone(),
             ..self.options
         };
 
         options.current_step_id += 1;
+        if let Some(hook) = options.prepare_step.clone() {
+            hook(&mut options);
+        }
         let response = self.model.generate_text(options.clone()).await?;
 
         match response.content {
-            LanguageModelResponseContentType::Text(text) => {
+            LanguageModelResponseContentType::Text(ref text) => {
                 let assistant_msg = Message::Assistant(AssistantMessage {
-                    content: text.into(),
+                    content: text.clone().into(),
                     usage: response.usage.clone(),
                 });
                 options
                     .messages
                     .push(TaggedMessage::new(options.current_step_id, assistant_msg));
 
+                if let Some(ref hook) = options.on_step_finish {
+                    hook(&options);
+                }
                 Ok(GenerateTextResponse {
                     options,
                     model: response.model,
@@ -792,21 +867,36 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
                     usage: response.usage,
                 })
             }
-            LanguageModelResponseContentType::ToolCall(tool_info) => {
+            LanguageModelResponseContentType::ToolCall(ref tool_info) => {
                 // add tool message
+                let usage = response.usage.clone();
                 let _ = &options.messages.push(TaggedMessage::new(
                     options.current_step_id,
                     Message::Assistant(AssistantMessage::new(
                         LanguageModelResponseContentType::ToolCall(tool_info.clone()),
-                        response.usage,
+                        usage,
                     )),
                 ));
 
                 let mut tool_steps = Vec::new();
-                handle_tool_call(&mut options, vec![tool_info], &mut tool_steps).await;
+                handle_tool_call(&mut options, vec![tool_info.clone()], &mut tool_steps).await;
+
+                if let Some(ref hook) = options.on_step_finish {
+                    hook(&options);
+                }
+
+                if let Some(ref hook) = options.stop_when
+                    && hook(&options)
+                {
+                    return Ok(GenerateTextResponse {
+                        options,
+                        model: response.model,
+                        stop_reason: Some("Stopped by hook".to_string()),
+                        usage: response.usage,
+                    });
+                }
 
                 // update anything options
-                options.current_step_id += 1;
                 self.options = options;
 
                 // call the next step with the tool results
@@ -830,10 +920,17 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
             schema: self.options.schema.to_owned(),
             stop_sequences: self.options.stop_sequences.to_owned(),
             tools: self.options.tools.to_owned(),
+            stop_when: self.options.stop_when.clone(),
+            prepare_step: self.options.prepare_step.clone(),
+            on_step_finish: self.options.on_step_finish.clone(),
             ..self.options
         };
 
         options.current_step_id += 1;
+        if let Some(hook) = options.prepare_step.clone() {
+            hook(&mut options);
+        }
+
         let mut response = self.model.stream_text(options.to_owned()).await?;
 
         let (tx, stream) = MpmcStream::new();
@@ -852,6 +949,10 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
                                 step_id: options.current_step_id,
                                 message: assistant_msg,
                             });
+
+                            if let Some(ref hook) = options.on_step_finish {
+                                hook(&options);
+                            }
                         }
                         LanguageModelResponseContentType::ToolCall(tool_info) => {
                             // add tool message
@@ -870,6 +971,19 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
                                 &mut current_tool_steps,
                             )
                             .await;
+
+                            if let Some(ref hook) = options.on_step_finish {
+                                hook(&options);
+                            }
+
+                            if let Some(ref hook) = options.stop_when
+                                && hook(&options)
+                            {
+                                let _ = tx.send(LanguageModelStreamChunkType::Incomplete(
+                                    "Stopped by hook".to_string(),
+                                ));
+                                break;
+                            }
 
                             // update anything options
                             options.current_step_id += 1;
