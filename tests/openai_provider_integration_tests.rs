@@ -12,7 +12,8 @@ use aisdk::{
 use dotenv::dotenv;
 use futures::StreamExt;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+
 use std::sync::{Arc, Mutex};
 
 #[tokio::test]
@@ -200,7 +201,7 @@ async fn test_generate_text_with_output_schema() {
         return;
     }
 
-    #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+    #[derive(Debug, JsonSchema, Deserialize)]
     #[allow(dead_code)]
     struct User {
         name: String,
@@ -233,7 +234,7 @@ async fn test_stream_text_with_output_schema() {
         return;
     }
 
-    #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+    #[derive(Debug, JsonSchema, Deserialize)]
     #[allow(dead_code)]
     struct User {
         name: String,

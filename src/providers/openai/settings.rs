@@ -1,12 +1,11 @@
 //! Defines the settings for the OpenAI provider.
 
 use async_openai::{Client, config::OpenAIConfig};
-use serde::{Deserialize, Serialize};
 
 use crate::{error::Error, providers::openai::OpenAI};
 
 /// Settings for the OpenAI provider.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct OpenAIProviderSettings {
     /// The API base URL for the OpenAI API.
     pub base_url: String,
