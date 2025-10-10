@@ -1,5 +1,5 @@
 use crate::core::{
-    ToolResultInfo,
+    ToolCallInfo, ToolResultInfo,
     language_model::{LanguageModelResponseContentType, Usage},
 };
 
@@ -252,5 +252,42 @@ impl From<Message> for TaggedMessage {
 impl From<TaggedMessage> for Message {
     fn from(value: TaggedMessage) -> Self {
         value.message
+    }
+}
+
+/// Helper trait for extracting messages from TaggedMessage collections
+pub(crate) trait TaggedMessageHelpers {
+    fn extract_tool_calls(&self) -> Option<Vec<ToolCallInfo>>;
+    fn extract_tool_results(&self) -> Option<Vec<ToolResultInfo>>;
+}
+
+impl TaggedMessageHelpers for [TaggedMessage] {
+    fn extract_tool_calls(&self) -> Option<Vec<ToolCallInfo>> {
+        let calls: Vec<ToolCallInfo> = self
+            .iter()
+            .filter_map(|msg| match msg.message {
+                Message::Assistant(AssistantMessage {
+                    content: LanguageModelResponseContentType::ToolCall(ref info),
+                    ..
+                }) => Some(info.clone()),
+                _ => None,
+            })
+            .collect();
+        if calls.is_empty() { None } else { Some(calls) }
+    }
+
+    fn extract_tool_results(&self) -> Option<Vec<ToolResultInfo>> {
+        let results: Vec<ToolResultInfo> = self
+            .iter()
+            .filter_map(|msg| match msg.message {
+                Message::Tool(ref info) => Some(info.clone()),
+                _ => None,
+            })
+            .collect();
+        if results.is_empty() {
+            None
+        } else {
+            Some(results)
+        }
     }
 }
