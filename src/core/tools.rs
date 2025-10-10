@@ -5,25 +5,22 @@ use schemars::Schema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt::Debug;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-pub type ToolFn = Box<dyn FnMut(Value) -> std::result::Result<String, String> + Send + Sync>;
+pub type ToolFn = Box<dyn Fn(Value) -> std::result::Result<String, String> + Send + Sync>;
 
 #[derive(Clone)]
 pub struct ToolExecute {
-    inner: Arc<Mutex<ToolFn>>,
+    inner: Arc<ToolFn>,
 }
 
 impl ToolExecute {
-    pub async fn call(&self, map: Value) -> Result<String> {
-        let mut guard = self.inner.lock().unwrap();
-        (guard)(map).map_err(Error::ToolCallError)
+    pub fn call(&self, map: Value) -> Result<String> {
+        (*self.inner)(map).map_err(Error::ToolCallError)
     }
 
     pub fn new(f: ToolFn) -> Self {
-        Self {
-            inner: Arc::new(Mutex::new(f)),
-        }
+        Self { inner: Arc::new(f) }
     }
 }
 
@@ -105,7 +102,7 @@ impl ToolList {
             tokio::spawn(async move {
                 let tool = tools.iter().find(|t| t.name == info.tool.name);
                 match tool {
-                    Some(tool) => tool.execute.call(info.input).await,
+                    Some(tool) => tool.execute.call(info.input),
                     None => Err(crate::error::Error::ToolCallError(
                         "Tool not found".to_string(),
                     )),
@@ -246,7 +243,6 @@ mod tests {
                     .into_iter()
                     .collect()
                 ))
-                .await
                 .unwrap(),
             "10".to_string()
         );

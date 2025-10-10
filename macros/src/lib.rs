@@ -79,27 +79,29 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
         fn_name.to_string()
     };
 
-    let binding_tokens: Vec<_> = inputs.iter().filter_map(|arg| {
-        if let FnArg::Typed(pat_type) = arg {
-            if let Pat::Ident(pat_ident) = &*pat_type.pat {
-                let ident = &pat_ident.ident;
-                let ty = &*pat_type.ty;
-                let ident_str = ident.to_string();
-                Some(quote! {
-                    let #ident: #ty = serde_json::from_value(
-                        inp.as_object_mut().unwrap().remove(#ident_str) // TODO: unnecessary unwrap
-                            .unwrap_or_else(|| todo!("Missing required parameter: {}", #ident_str))
-                    ).unwrap_or_else(|e| {
-                        todo!("Failed to deserialize {}: {}", #ident_str, e)
-                    });
-                })
+    let binding_tokens: Vec<_> = inputs
+        .iter()
+        .filter_map(|arg| {
+            if let FnArg::Typed(pat_type) = arg {
+                if let Pat::Ident(pat_ident) = &*pat_type.pat {
+                    let ident = &pat_ident.ident;
+                    let ty = &*pat_type.ty;
+                    let ident_str = ident.to_string();
+                    Some(quote! {
+                        let #ident: #ty = serde_json::from_value(
+                            inp.as_object().unwrap().get(#ident_str).unwrap().clone()
+                        ).unwrap_or_else(|e| {
+                            todo!("Failed to deserialize {}: {}", #ident_str, e)
+                        });
+                    })
+                } else {
+                    None
+                }
             } else {
                 None
             }
-        } else {
-            None
-        }
-    }).collect();
+        })
+        .collect();
 
     // Generate the struct definition
     let struct_fields = inputs.iter().filter_map(|arg| {
@@ -142,7 +144,7 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
             tool.name = #name.to_string();
             tool.description = #description.to_string();
             tool.input_schema = input_schema;
-            tool.execute = ToolExecute::new(Box::new(|mut inp| -> std::result::Result<String, String> {
+            tool.execute = ToolExecute::new(Box::new(|inp| -> std::result::Result<String, String> {
                 // TODO: Do `input_schema` validation on inp
                 // Extract all parameters from the HashMap here
                 #(#binding_tokens)*
