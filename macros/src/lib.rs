@@ -119,12 +119,10 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
     });
 
     let expanded = quote! {
-        // TODO: If there is a way to remove the usage of Tool and ToolExecute here it would be
+        // TODO OR NOT TODO: If there is a way to remove the usage of Tool and ToolExecute here it would be
         // nice. currently the user has to import these types.
         #[allow(unused_variables)]
         #vis fn #fn_name() -> Tool {
-            // TODO: There is a possibiltiy to run schema genration during compile time here.
-            // This will potentiolly remove the need for additional runtime dependency.
             use schemars::{schema_for, JsonSchema, Schema};
             use serde::Serialize;
             use std::collections::HashMap;

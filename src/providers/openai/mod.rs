@@ -3,6 +3,7 @@
 
 pub mod conversions;
 pub mod settings;
+use async_openai::error::OpenAIError;
 use async_openai::types::responses::{
     Content, CreateResponse, OutputContent, OutputItem, Response, ResponseEvent, ResponseStream,
 };
@@ -14,10 +15,11 @@ use crate::core::language_model::{
     LanguageModelStreamChunkType, LanguageModelStreamResponse,
 };
 use crate::core::messages::AssistantMessage;
+use crate::error::ProviderError;
 use crate::providers::openai::settings::{OpenAIProviderSettings, OpenAIProviderSettingsBuilder};
 use crate::{
     core::{language_model::LanguageModel, provider::Provider, tools::ToolCallInfo},
-    error::Result,
+    error::{Error, Result},
 };
 use async_trait::async_trait;
 use serde::Serialize;
@@ -47,6 +49,8 @@ impl OpenAI {
 
 impl Provider for OpenAI {}
 
+impl ProviderError for OpenAIError {}
+
 #[async_trait]
 impl LanguageModel for OpenAI {
     async fn generate_text(
@@ -57,7 +61,12 @@ impl LanguageModel for OpenAI {
 
         request.model = self.settings.model_name.to_string();
 
-        let response: Response = self.client.responses().create(request).await?;
+        let response: Response = self
+            .client
+            .responses()
+            .create(request)
+            .await
+            .map_err(|e| Error::ProviderError(Box::new(e)))?;
         let mut collected: Vec<LanguageModelResponseContentType> = Vec::new();
 
         for out in response.output {
@@ -97,7 +106,12 @@ impl LanguageModel for OpenAI {
         request.model = self.settings.model_name.to_string();
         request.stream = Some(true);
 
-        let openai_stream: ResponseStream = self.client.responses().create_stream(request).await?;
+        let openai_stream: ResponseStream = self
+            .client
+            .responses()
+            .create_stream(request)
+            .await
+            .map_err(|e| Error::ProviderError(Box::new(e)))?;
 
         let (first, rest) = openai_stream.into_future().await;
 
@@ -206,7 +220,7 @@ impl LanguageModel for OpenAI {
                     )))),
                     Err(e) => {
                         state.completed = true;
-                        Some(Err(e.into()))
+                        Some(Err(Error::ProviderError(Box::new(e))))
                     }
                 })
             },

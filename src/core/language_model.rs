@@ -247,7 +247,6 @@ pub struct Step {
     pub messages: Vec<Message>,
 }
 
-// TODO: explore options to use traits
 impl Step {
     pub fn new(step_id: usize, messages: Vec<Message>) -> Self {
         Self { step_id, messages }
@@ -313,10 +312,6 @@ pub struct LanguageModelOptions {
 
     /// Used to track message steps
     pub(crate) current_step_id: usize,
-    // Additional provider-specific options. They are passed through
-    // to the provider from the AI SDK and enable provider-specific functionality.
-    //TODO: add support for provider options
-    //pub provider_options: <HashMap<String, <HashMap<String, JsonValue>>>>,
 }
 
 impl LanguageModelOptions {
@@ -885,8 +880,6 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
                                     }
                                 }
                                 Err(e) => {
-                                    // TODO: is this the right error to return. maybe Incomplete is
-                                    // correct
                                     let _ = tx
                                         .send(LanguageModelStreamChunkType::Failed(e.to_string()));
                                     break;

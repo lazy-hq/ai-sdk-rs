@@ -16,6 +16,9 @@
 
 use derive_builder::UninitializedFieldError;
 
+/// A marker trait for provider-specific errors.
+pub trait ProviderError: std::error::Error + Send + Sync {}
+
 /// A specialized `Result` type for SDK operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -41,10 +44,9 @@ pub enum Error {
     #[error("AI SDK error: {0}")]
     Other(String),
 
-    /// OpenAI provider error.
-    #[cfg(feature = "openai")]
-    #[error("OpenAI error: {0}")]
-    OpenAIError(#[from] async_openai::error::OpenAIError),
+    /// Provider-specific error.
+    #[error("Provider error: {0}")]
+    ProviderError(Box<dyn ProviderError>),
 }
 
 /// Implements `From` for `UninitializedFieldError` to convert it to `Error`.
@@ -63,8 +65,7 @@ impl From<Error> for String {
             Error::InvalidInput(error) => format!("Invalid input: {error}"),
             Error::ToolCallError(error) => format!("Tool error: {error}"),
             Error::Other(error) => format!("Other error: {error}"),
-            #[cfg(feature = "openai")]
-            Error::OpenAIError(error) => format!("OpenAI error: {error}"),
+            Error::ProviderError(error) => format!("Provider error: {error}"),
         }
     }
 }
