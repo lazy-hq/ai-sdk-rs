@@ -12,7 +12,7 @@ use futures::{StreamExt, stream::once};
 
 use crate::core::language_model::{
     LanguageModelOptions, LanguageModelResponse, LanguageModelResponseContentType,
-    LanguageModelStreamChunkType, LanguageModelStreamResponse,
+    LanguageModelStreamChunkType, ProviderStream,
 };
 use crate::core::messages::AssistantMessage;
 use crate::error::ProviderError;
@@ -51,6 +51,10 @@ impl ProviderError for OpenAIError {}
 
 #[async_trait]
 impl LanguageModel for OpenAI {
+    fn name(&self) -> String {
+        self.settings.model_name.clone()
+    }
+
     async fn generate_text(
         &mut self,
         options: LanguageModelOptions,
@@ -96,10 +100,7 @@ impl LanguageModel for OpenAI {
         })
     }
 
-    async fn stream_text(
-        &mut self,
-        options: LanguageModelOptions,
-    ) -> Result<LanguageModelStreamResponse> {
+    async fn stream_text(&mut self, options: LanguageModelOptions) -> Result<ProviderStream> {
         let mut request: CreateResponse = options.into();
         request.model = self.settings.model_name.to_string();
         request.stream = Some(true);
@@ -112,18 +113,6 @@ impl LanguageModel for OpenAI {
             .map_err(|e| Error::ProviderError(Box::new(e)))?;
 
         let (first, rest) = openai_stream.into_future().await;
-
-        // get the model name from the first response
-        let model = match &first {
-            Some(Ok(ResponseEvent::ResponseCreated(r))) => Some(
-                r.response
-                    .model
-                    .as_ref()
-                    .unwrap_or(&self.settings.model_name)
-                    .to_string(),
-            ),
-            _ => None,
-        };
 
         let openai_stream = if let Some(first) = first {
             Box::pin(once(async move { first }).chain(rest))
@@ -224,9 +213,6 @@ impl LanguageModel for OpenAI {
             },
         );
 
-        Ok(LanguageModelStreamResponse {
-            stream: Box::pin(stream),
-            model,
-        })
+        Ok(Box::pin(stream))
     }
 }

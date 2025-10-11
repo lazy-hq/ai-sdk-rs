@@ -2,7 +2,7 @@ use crate::core::{
     AssistantMessage, LanguageModelStreamChunkType, Message,
     language_model::{
         LanguageModel, LanguageModelOptions, LanguageModelResponseContentType,
-        LanguageModelResponseMethods, MpmcStream, request::LanguageModelRequest,
+        LanguageModelResponseMethods, LanguageModelStream, request::LanguageModelRequest,
     },
     messages::TaggedMessage,
     utils::{handle_tool_call, resolve_message},
@@ -39,9 +39,9 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
 
         let mut response = self.model.stream_text(options.to_owned()).await?;
 
-        let (tx, stream) = MpmcStream::new();
+        let (tx, stream) = LanguageModelStream::new();
         let _ = tx.send(LanguageModelStreamChunkType::Start);
-        while let Some(chunk) = response.stream.next().await {
+        while let Some(chunk) = response.next().await {
             match chunk {
                 Ok(LanguageModelStreamChunkType::End(assistant_msg)) => {
                     let usage = assistant_msg.usage.clone();
@@ -129,7 +129,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
 
         let result = StreamTextResponse {
             stream,
-            model: response.model,
+            model: Some(self.model.name()),
             options,
         };
 
@@ -145,7 +145,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
 // Response from a stream call on `StreamText`.
 pub struct StreamTextResponse {
     /// A stream of responses from the language model.
-    pub stream: MpmcStream,
+    pub stream: LanguageModelStream,
     /// The model that generated the response.
     pub model: Option<String>,
     /// The reason the model stopped generating text.
