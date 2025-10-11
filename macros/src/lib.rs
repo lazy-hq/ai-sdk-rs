@@ -124,10 +124,9 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
             // TODO: There is a possibiltiy to run schema genration during compile time here.
             // This will potentiolly remove the need for additional runtime dependency.
             use schemars::{schema_for, JsonSchema, Schema};
-            use serde::Serialize;
             use std::collections::HashMap;
 
-            #[derive(JsonSchema, Serialize, Debug)]
+            #[derive(JsonSchema, Debug)]
             //#[schemars(deny_unknown_fields)]
             struct Function {
                 // Please add struct fields here

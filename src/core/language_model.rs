@@ -18,7 +18,7 @@ use futures::StreamExt;
 use schemars::{JsonSchema, Schema, schema_for};
 use serde::de::DeserializeOwned;
 use serde::ser::Error as SerdeError;
-use serde::{Deserialize, Serialize};
+
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::Add;
@@ -271,7 +271,7 @@ impl StepMethods for Step {
 }
 
 /// Options for a language model request.
-#[derive(Clone, Default, Builder, Serialize, Deserialize)]
+#[derive(Clone, Default, Builder)]
 #[builder(pattern = "owned", setter(into), build_fn(error = "Error"))]
 pub struct LanguageModelOptions {
     /// System prompt to be used for the request.
@@ -325,14 +325,11 @@ pub struct LanguageModelOptions {
     pub(crate) current_step_id: usize,
 
     /// Hook to stop tool calling if returns true
-    #[serde(skip)]
     pub stop_when: Option<StopWhenHook>,
     /// Hook called before each step (language model request)
-    #[serde(skip)]
     pub prepare_step: Option<PrepareStepHook>,
 
     /// Hook called after each step finishes
-    #[serde(skip)]
     pub on_step_finish: Option<OnStepFinishHook>,
 }
 
@@ -371,7 +368,7 @@ impl LanguageModelOptions {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub enum LanguageModelResponseContentType {
     Text(String),
     ToolCall(ToolCallInfo),
@@ -395,7 +392,7 @@ impl LanguageModelResponseContentType {
     }
 }
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Default, Debug, Clone, PartialEq)]
 pub struct Usage {
     pub input_tokens: Option<usize>,
     pub output_tokens: Option<usize>,
@@ -420,7 +417,7 @@ impl Add for &Usage {
 
 // TODO: constract a standard response type
 /// Response from a language model.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct LanguageModelResponse {
     /// The generated text.
     pub content: LanguageModelResponseContentType,
@@ -449,7 +446,7 @@ impl LanguageModelResponse {
     }
 }
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone)]
 pub enum LanguageModelStreamChunkType {
     /// The model has started generating text.
     #[default]
@@ -506,7 +503,7 @@ impl Stream for MpmcStream {
 }
 
 /// Options for text generation requests such as `generate_text` and `stream_text`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct LanguageModelRequest<M: LanguageModel> {
     /// The Language Model to use.
     pub model: M,
@@ -754,7 +751,7 @@ impl<M: LanguageModel> LanguageModelRequestBuilder<M, OptionsStage> {
 
 //TODO: add standard response fields
 /// Response from a generate call on `GenerateText`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct GenerateTextResponse {
     /// The options that generated this response
     pub options: LanguageModelOptions, // TODO: implement getters

@@ -20,12 +20,10 @@ use crate::{
     error::Result,
 };
 use async_trait::async_trait;
-use serde::Serialize;
 
 /// The OpenAI provider.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone)]
 pub struct OpenAI {
-    #[serde(skip)]
     client: Client<OpenAIConfig>,
     settings: OpenAIProviderSettings,
 }
