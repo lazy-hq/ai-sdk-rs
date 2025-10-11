@@ -68,7 +68,7 @@ impl LanguageModel for OpenAI {
             .responses()
             .create(request)
             .await
-            .map_err(|e| Error::ProviderError(Box::new(e)))?;
+            .map_err(|e| Error::ProviderError(Arc::new(e)))?;
         let mut collected: Vec<LanguageModelResponseContentType> = Vec::new();
 
         for out in response.output {
@@ -110,7 +110,7 @@ impl LanguageModel for OpenAI {
             .responses()
             .create_stream(request)
             .await
-            .map_err(|e| Error::ProviderError(Box::new(e)))?;
+            .map_err(|e| Error::ProviderError(Arc::new(e)))?;
 
         let (first, rest) = openai_stream.into_future().await;
 
@@ -207,7 +207,7 @@ impl LanguageModel for OpenAI {
                     )))),
                     Err(e) => {
                         state.completed = true;
-                        Some(Err(Error::ProviderError(Box::new(e))))
+                        Some(Err(Error::ProviderError(Arc::new(e))))
                     }
                 })
             },

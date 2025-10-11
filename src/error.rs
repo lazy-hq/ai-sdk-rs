@@ -14,16 +14,24 @@
 //! }
 //! ```
 
+use std::sync::Arc;
+
 use derive_builder::UninitializedFieldError;
 
 /// A marker trait for provider-specific errors.
 pub trait ProviderError: std::error::Error + Send + Sync {}
 
+impl PartialEq for dyn ProviderError {
+    fn eq(&self, other: &dyn ProviderError) -> bool {
+        self.to_string() == other.to_string()
+    }
+}
+
 /// A specialized `Result` type for SDK operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// The primary error enum for all SDK-related failures.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Clone)]
 pub enum Error {
     /// Error indicating a required field was missing.
     #[error("A required field is missing: {0}")]
@@ -46,7 +54,7 @@ pub enum Error {
 
     /// Provider-specific error.
     #[error("Provider error: {0}")]
-    ProviderError(Box<dyn ProviderError>),
+    ProviderError(Arc<dyn ProviderError>),
 }
 
 /// Implements `From` for `UninitializedFieldError` to convert it to `Error`.
