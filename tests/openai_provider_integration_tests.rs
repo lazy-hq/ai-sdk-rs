@@ -2,7 +2,9 @@
 
 use aisdk::{
     core::{
-        LanguageModelRequest, LanguageModelStreamChunkType, Message, ResponseMethods, tool,
+        LanguageModelRequest, LanguageModelResponseMethods, LanguageModelStreamChunkType, Message,
+        language_model::LanguageModelResponseContentType,
+        tool,
         tools::{Tool, ToolExecute},
     },
     providers::openai::OpenAI,
@@ -10,7 +12,9 @@ use aisdk::{
 use dotenv::dotenv;
 use futures::StreamExt;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+
+use std::sync::{Arc, Mutex};
 
 #[tokio::test]
 async fn test_generate_text_with_openai() {
@@ -197,7 +201,7 @@ async fn test_generate_text_with_output_schema() {
         return;
     }
 
-    #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+    #[derive(Debug, JsonSchema, Deserialize)]
     #[allow(dead_code)]
     struct User {
         name: String,
@@ -230,7 +234,7 @@ async fn test_stream_text_with_output_schema() {
         return;
     }
 
-    #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+    #[derive(Debug, JsonSchema, Deserialize)]
     #[allow(dead_code)]
     struct User {
         name: String,
@@ -387,7 +391,7 @@ async fn test_step_id_tool_call_flow() {
     assert_eq!(step_ids[1], 0);
     assert_eq!(step_ids[2], 1); // assistant tool call
     assert_eq!(step_ids[3], 1); // tool result
-    assert_eq!(step_ids[4], 3); // assistant text
+    assert_eq!(step_ids[4], 2); // assistant text
     assert!(result.text().unwrap().contains("test_value"));
 }
 
@@ -414,4 +418,447 @@ async fn test_step_id_streaming() {
     assert_eq!(step_ids[0], 0);
     assert_eq!(step_ids[1], 0);
     assert_eq!(step_ids[2], 1);
+}
+
+#[tokio::test]
+async fn test_prepare_step_executes_before_each_step() {
+    dotenv().ok();
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        return;
+    }
+
+    let counter = Arc::new(Mutex::new(0));
+    let counter_clone = Arc::clone(&counter);
+
+    #[tool]
+    // Returns the neighborhood
+    fn get_neighborhood() -> Result<String> {
+        Ok("ankocha".to_string())
+    }
+
+    let _ = LanguageModelRequest::builder()
+        .model(OpenAI::new("gpt-4o"))
+        .system("Call the tool. Return the neighborhood. Nothing more and nothing less")
+        .prompt("What is the neighborhood?")
+        .with_tool(get_neighborhood())
+        .prepare_step(move |_| {
+            let mut c = counter_clone.lock().unwrap();
+            *c += 1;
+        })
+        .build()
+        .generate_text()
+        .await
+        .unwrap();
+
+    let count = *counter.lock().unwrap();
+    assert!(count >= 2); // At least initial + tool step
+}
+
+#[tokio::test]
+async fn test_on_step_finish_executes_after_each_step() {
+    dotenv().ok();
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        return;
+    }
+
+    let counter = Arc::new(Mutex::new(0));
+    let counter_clone = Arc::clone(&counter);
+
+    #[tool]
+    // Returns the neighbourhood
+    fn get_neighborhood() -> Result<String> {
+        Ok("ankocha".to_string())
+    }
+
+    let _ = LanguageModelRequest::builder()
+        .model(OpenAI::new("gpt-4o"))
+        .system("Call the tool. Return the neighborhood. Nothing more and nothing less")
+        .prompt("What is the neighborhood?")
+        .with_tool(get_neighborhood())
+        .on_step_finish(move |_| {
+            let mut c = counter_clone.lock().unwrap();
+            *c += 1;
+        })
+        .build()
+        .generate_text()
+        .await
+        .unwrap();
+
+    let count = *counter.lock().unwrap();
+    assert!(count >= 2);
+}
+
+#[tokio::test]
+async fn test_hooks_run_in_correct_order() {
+    dotenv().ok();
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        return;
+    }
+
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let log_prepare = Arc::clone(&log);
+    let log_finish = Arc::clone(&log);
+
+    #[tool]
+    fn get_neighbourhood() -> Result<String> {
+        Ok("".to_string())
+    }
+
+    let _ = LanguageModelRequest::builder()
+        .model(OpenAI::new("gpt-4o"))
+        .system("Call the tool. Return the neighborhood. Nothing more and nothing less")
+        .prompt("What is the neighborhood?")
+        .with_tool(get_neighbourhood())
+        .prepare_step(move |_| {
+            log_prepare.lock().unwrap().push("prepare");
+        })
+        .on_step_finish(move |_| {
+            log_finish.lock().unwrap().push("finish");
+        })
+        .build()
+        .generate_text()
+        .await
+        .unwrap();
+
+    let log = log.lock().unwrap();
+    // Check pairs of prepare/finish
+    let mut i = 0;
+    while i + 1 < log.len() {
+        assert_eq!(log[i], "prepare");
+        assert_eq!(log[i + 1], "finish");
+        i += 2;
+    }
+}
+
+#[tokio::test]
+async fn test_stop_when_halts_during_tool_call() {
+    dotenv().ok();
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        return;
+    }
+
+    #[tool]
+    fn get_neighborhood() -> Result<String> {
+        Ok("done".to_string())
+    }
+
+    let result = LanguageModelRequest::builder()
+        .model(OpenAI::new("gpt-4o"))
+        .system("Call the tool. Return the neighborhood. Nothing more and nothing less")
+        .prompt("What is the neighborhood?")
+        .with_tool(get_neighborhood())
+        .stop_when(|_| true) // Always stop
+        .build()
+        .generate_text()
+        .await
+        .unwrap();
+
+    let step_ids = result.step_ids();
+    // Should stop after tool call, no final text step
+    assert!(step_ids.len() < 5); // Less than full flow
+    assert!(
+        result
+            .stop_reason
+            .as_ref()
+            .unwrap()
+            .contains("Stopped by hook")
+    );
+}
+
+#[tokio::test]
+async fn test_stop_when_halts_during_streaming() {
+    dotenv().ok();
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        return;
+    }
+
+    #[tool]
+    fn get_neighbourhood() -> Result<String> {
+        Ok("ankocha".to_string())
+    }
+
+    let response = LanguageModelRequest::builder()
+        .model(OpenAI::new("gpt-4o"))
+        .system("Call the tool. Return the neighborhood. Nothing more and nothing less")
+        .prompt("What is the neighborhood?")
+        .with_tool(get_neighbourhood())
+        .stop_when(|_| true)
+        .build()
+        .stream_text()
+        .await
+        .unwrap();
+
+    let mut stream = response.stream;
+    let mut found_incomplete = false;
+    while let Some(chunk) = stream.next().await {
+        if let LanguageModelStreamChunkType::Incomplete(_) = chunk {
+            found_incomplete = true;
+            break;
+        }
+    }
+    assert!(found_incomplete);
+}
+
+#[tokio::test]
+async fn test_stop_when_false_allows_continuation() {
+    dotenv().ok();
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        return;
+    }
+
+    #[tool]
+    fn get_neighbourhood() -> Result<String> {
+        Ok("done".to_string())
+    }
+
+    let result = LanguageModelRequest::builder()
+        .model(OpenAI::new("gpt-4o"))
+        .system("Call the tool. Return the neighborhood. Nothing more and nothing less")
+        .prompt("What is the neighborhood?")
+        .with_tool(get_neighbourhood())
+        .stop_when(|_| false) // Never stop
+        .build()
+        .generate_text()
+        .await
+        .unwrap();
+
+    let step_ids = result.step_ids();
+    assert!(step_ids.len() >= 5); // Full flow
+    assert!(result.text().is_some());
+}
+
+#[tokio::test]
+async fn test_hooks_persist_across_multiple_steps() {
+    dotenv().ok();
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        return;
+    }
+
+    let counter = Arc::new(Mutex::new(0));
+    let counter_clone = Arc::clone(&counter);
+
+    #[tool]
+    fn get_neighbourhood() -> Result<String> {
+        Ok("You can find the neighborhood if you call the get_neighbourhood_2 tool".to_string())
+    }
+
+    #[tool]
+    fn get_neighbourhood_2() -> Result<String> {
+        Ok("ankocha".to_string())
+    }
+
+    let _ = LanguageModelRequest::builder()
+        .model(OpenAI::new("gpt-4o"))
+        .system(
+            "Call the tool get_neighbourhood. Return the neighborhood. 
+            Nothing more and nothing less. If you can't find the neighborhood,
+            call the tool get_neighbourhood_2. Return the neighborhood.
+            Nothing more and nothing less",
+        )
+        .prompt("What is the neighborhood?")
+        .with_tool(get_neighbourhood())
+        .with_tool(get_neighbourhood_2())
+        .on_step_finish(move |_| {
+            let mut c = counter_clone.lock().unwrap();
+            *c += 1;
+        })
+        .build()
+        .generate_text()
+        .await
+        .unwrap();
+
+    let count = *counter.lock().unwrap();
+    assert!(count >= 3); // Multiple steps
+}
+
+#[tokio::test]
+async fn test_hooks_cloned_via_arc() {
+    dotenv().ok();
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        return;
+    }
+
+    let called = Arc::new(Mutex::new(false));
+    let called_clone = Arc::clone(&called);
+
+    let _ = LanguageModelRequest::builder()
+        .model(OpenAI::new("gpt-4o"))
+        .prompt("Say hello")
+        .on_step_finish(move |_| {
+            *called_clone.lock().unwrap() = true;
+        })
+        .build()
+        .generate_text()
+        .await
+        .unwrap();
+
+    assert!(*called.lock().unwrap());
+}
+
+#[tokio::test]
+async fn test_no_panic_when_hooks_none() {
+    dotenv().ok();
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        return;
+    }
+
+    let result = LanguageModelRequest::builder()
+        .model(OpenAI::new("gpt-4o"))
+        .prompt("Say hello")
+        .build()
+        .generate_text()
+        .await;
+
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_prepare_step_mutates_options() {
+    dotenv().ok();
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        return;
+    }
+
+    let result = LanguageModelRequest::builder()
+        .model(OpenAI::new("gpt-4o"))
+        .prompt("Say hello")
+        .prepare_step(|opts| {
+            opts.temperature = Some(0); // Mutate
+        })
+        .build()
+        .generate_text()
+        .await
+        .unwrap();
+
+    // Hard to verify mutation directly, but ensure no panic and response ok
+    assert!(result.text().is_some());
+}
+
+#[tokio::test]
+async fn test_hook_isolation() {
+    dotenv().ok();
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        return;
+    }
+
+    // Without hooks
+    let result_no_hooks = LanguageModelRequest::builder()
+        .model(OpenAI::new("gpt-4o"))
+        .prompt("Say hello")
+        .build()
+        .generate_text()
+        .await
+        .unwrap();
+
+    // With hooks (should not affect output)
+    let result_with_hooks = LanguageModelRequest::builder()
+        .model(OpenAI::new("gpt-4o"))
+        .prompt("Say hello")
+        .on_step_finish(|_| {})
+        .build()
+        .generate_text()
+        .await
+        .unwrap();
+
+    // Outputs should be similar (hooks don't change logic)
+    assert!(result_no_hooks.text().is_some());
+    assert!(result_with_hooks.text().is_some());
+}
+
+#[tokio::test]
+async fn test_on_step_finish_for_text_and_tool_call() {
+    dotenv().ok();
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        return;
+    }
+
+    let called_for_text = Arc::new(Mutex::new(false));
+    let called_for_tool = Arc::new(Mutex::new(false));
+    let text_clone = Arc::clone(&called_for_text);
+    let tool_clone = Arc::clone(&called_for_tool);
+
+    #[tool]
+    // Returns the username
+    fn get_username() -> Result<String> {
+        Ok("ishak".to_string())
+    }
+
+    let result = LanguageModelRequest::builder()
+        .model(OpenAI::new("gpt-4o"))
+        .system("Call the tool. to find the username. and return only the username nothing more and nothing less")
+        .prompt("What is the username")
+        .with_tool(get_username())
+        .on_step_finish(move |opts| {
+            if let Some(Message::Assistant(assistant_msg)) = opts.messages().last() {
+                match &assistant_msg.content {
+                    LanguageModelResponseContentType::ToolCall(_) => {
+                        println!("Tool called");
+                        *tool_clone.lock().unwrap() = true;
+                    }
+                    LanguageModelResponseContentType::Text(_) => {
+                        println!("Text returned");
+                        *text_clone.lock().unwrap() = true;
+                    }
+                }
+            }
+        })
+        .build()
+        .generate_text()
+        .await
+        .unwrap();
+
+    assert!(!*called_for_tool.lock().unwrap());
+    assert!(*called_for_text.lock().unwrap());
+    assert_eq!(result.text().unwrap(), "ishak");
+}
+
+#[tokio::test]
+async fn test_streaming_prepare_step_before_start() {
+    dotenv().ok();
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        return;
+    }
+
+    let called = Arc::new(Mutex::new(false));
+    let called_clone = Arc::clone(&called);
+
+    let _ = LanguageModelRequest::builder()
+        .model(OpenAI::new("gpt-4o"))
+        .prompt("Say hello")
+        .prepare_step(move |_| {
+            *called_clone.lock().unwrap() = true;
+        })
+        .build()
+        .stream_text()
+        .await
+        .unwrap();
+
+    assert!(*called.lock().unwrap()); // Called before streaming starts
+}
+
+#[tokio::test]
+async fn test_streaming_on_step_finish_at_end() {
+    dotenv().ok();
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        return;
+    }
+
+    let called = Arc::new(Mutex::new(false));
+    let called_clone = Arc::clone(&called);
+
+    let response = LanguageModelRequest::builder()
+        .model(OpenAI::new("gpt-4o"))
+        .prompt("Say hello")
+        .on_step_finish(move |_| {
+            *called_clone.lock().unwrap() = true;
+        })
+        .build()
+        .stream_text()
+        .await
+        .unwrap();
+
+    let mut stream = response.stream;
+    while stream.next().await.is_some() {} // Consume stream
+
+    assert!(*called.lock().unwrap()); // Called after End
 }

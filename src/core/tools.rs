@@ -48,7 +48,7 @@ impl<'de> Deserialize<'de> for ToolExecute {
     }
 }
 
-#[derive(Builder, Clone, Serialize, Deserialize, Default)]
+#[derive(Builder, Clone, Default)]
 #[builder(pattern = "owned", setter(into), build_fn(error = "Error"))]
 pub struct Tool {
     /// The name of the tool
@@ -81,7 +81,7 @@ impl Tool {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ToolList {
     pub tools: Vec<Tool>,
 }
@@ -118,7 +118,7 @@ impl ToolList {
     }
 }
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Default, Debug, Clone, PartialEq)]
 /// Describes a tool
 pub struct ToolDetails {
     // the name of the tool, usually a function name.
@@ -128,7 +128,7 @@ pub struct ToolDetails {
 }
 
 /// Contains information necessary to call a tool
-#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Default, Debug, Clone, PartialEq)]
 pub struct ToolCallInfo {
     pub tool: ToolDetails,
     pub input: serde_json::Value,
@@ -159,7 +159,7 @@ impl ToolCallInfo {
 }
 
 /// Contains information from a tool
-#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Default, Debug, Clone, PartialEq)]
 pub struct ToolResultInfo {
     pub tool: ToolDetails,
     pub output: serde_json::Value,
@@ -190,6 +190,7 @@ impl ToolResultInfo {
 }
 
 // tests
+#[allow(dead_code)]
 #[cfg(test)]
 mod tests {
     use super::*;

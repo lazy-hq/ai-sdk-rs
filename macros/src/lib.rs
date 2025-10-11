@@ -124,10 +124,9 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
         #[allow(unused_variables)]
         #vis fn #fn_name() -> Tool {
             use schemars::{schema_for, JsonSchema, Schema};
-            use serde::Serialize;
             use std::collections::HashMap;
 
-            #[derive(JsonSchema, Serialize, Debug)]
+            #[derive(JsonSchema, Debug)]
             //#[schemars(deny_unknown_fields)]
             struct Function {
                 // Please add struct fields here
