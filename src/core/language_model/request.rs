@@ -218,11 +218,6 @@ impl<M: LanguageModel> LanguageModelRequestBuilder<M, OptionsStage> {
         self
     }
 
-    pub fn step_count(mut self, step_count: usize) -> Self {
-        self.step_count = Some(step_count);
-        self
-    }
-
     pub fn stop_when<F>(mut self, hook: F) -> Self
     where
         F: Fn(&LanguageModelOptions) -> bool + Send + Sync + 'static,

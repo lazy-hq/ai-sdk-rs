@@ -1,15 +1,19 @@
-use crate::core::{
-    AssistantMessage, LanguageModelResponseMethods, Message,
-    language_model::{
-        LanguageModel, LanguageModelOptions, LanguageModelResponseContentType, Usage,
-        request::LanguageModelRequest,
-    },
-    messages::TaggedMessage,
-    utils::{handle_tool_call, resolve_message},
-};
 use crate::error::Result;
+use crate::{
+    Error,
+    core::{
+        AssistantMessage, Message,
+        language_model::{
+            LanguageModel, LanguageModelOptions, LanguageModelResponse,
+            LanguageModelResponseContentType, StopReason, request::LanguageModelRequest,
+        },
+        messages::TaggedMessage,
+        utils::resolve_message,
+    },
+};
 use serde::de::DeserializeOwned;
 use serde::ser::Error as SerdeError;
+use std::ops::Deref;
 
 impl<M: LanguageModel> LanguageModelRequest<M> {
     /// Generates text using a specified language model.
@@ -30,71 +34,85 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
             stop_when: self.options.stop_when.clone(),
             prepare_step: self.options.prepare_step.clone(),
             on_step_finish: self.options.on_step_finish.clone(),
+            stop_reason: None,
             ..self.options
         };
 
-        options.current_step_id += 1;
-        if let Some(hook) = options.prepare_step.clone() {
-            hook(&mut options);
-        }
-        let response = self.model.generate_text(options.clone()).await?;
+        loop {
+            // Update the current step
+            options.current_step_id += 1;
 
-        match response.content {
-            LanguageModelResponseContentType::Text(ref text) => {
-                let assistant_msg = Message::Assistant(AssistantMessage {
-                    content: text.clone().into(),
-                    usage: response.usage.clone(),
-                });
-                options
-                    .messages
-                    .push(TaggedMessage::new(options.current_step_id, assistant_msg));
-
-                if let Some(ref hook) = options.on_step_finish {
-                    hook(&options);
-                }
-                Ok(GenerateTextResponse {
-                    options,
-                    model: response.model,
-                    stop_reason: response.stop_reason,
-                    usage: response.usage,
-                })
+            // Prepare the next step
+            if let Some(hook) = options.prepare_step.clone() {
+                hook(&mut options);
             }
-            LanguageModelResponseContentType::ToolCall(ref tool_info) => {
-                // add tool message
-                let usage = response.usage.clone();
-                let _ = &options.messages.push(TaggedMessage::new(
-                    options.current_step_id,
-                    Message::Assistant(AssistantMessage::new(
-                        LanguageModelResponseContentType::ToolCall(tool_info.clone()),
-                        usage,
-                    )),
-                ));
 
-                let mut tool_steps = Vec::new();
-                handle_tool_call(&mut options, vec![tool_info.clone()], &mut tool_steps).await;
+            let response: LanguageModelResponse = self
+                .model
+                .generate_text(options.clone())
+                .await
+                .inspect_err(|e| {
+                options.stop_reason = Some(StopReason::Error(e.clone()));
+            })?;
 
-                if let Some(ref hook) = options.on_step_finish {
-                    hook(&options);
+            for output in response.contents.iter() {
+                match output {
+                    LanguageModelResponseContentType::Text(text) => {
+                        let assistant_msg = Message::Assistant(AssistantMessage {
+                            content: text.clone().into(),
+                            usage: response.usage.clone(),
+                        });
+                        options
+                            .messages
+                            .push(TaggedMessage::new(options.current_step_id, assistant_msg));
+                    }
+                    LanguageModelResponseContentType::ToolCall(tool_info) => {
+                        // add tool message
+                        let usage = response.usage.clone();
+                        let _ = &options.messages.push(TaggedMessage::new(
+                            options.current_step_id.to_owned(),
+                            Message::Assistant(AssistantMessage::new(
+                                LanguageModelResponseContentType::ToolCall(tool_info.clone()),
+                                usage,
+                            )),
+                        ));
+
+                        options.handle_tool_call(tool_info).await;
+                    }
+                    _ => (),
                 }
-
-                if let Some(ref hook) = options.stop_when
-                    && hook(&options)
-                {
-                    return Ok(GenerateTextResponse {
-                        options,
-                        model: response.model,
-                        stop_reason: Some("Stopped by hook".to_string()),
-                        usage: response.usage,
-                    });
-                }
-
-                // update anything options
-                self.options = options;
-
-                // call the next step with the tool results
-                Box::pin(self.generate_text()).await
             }
+
+            // Finish the step
+            if let Some(ref hook) = options.on_step_finish {
+                hook(&options);
+            };
+
+            if response.contents.is_empty() {
+                options.stop_reason = Some(StopReason::Error(Error::Other(
+                    "Language model returned empty response".to_string(),
+                )));
+                break;
+            }
+
+            // Stop If
+            if let Some(hook) = &options.stop_when.clone()
+                && hook(&options)
+            {
+                options.stop_reason = Some(StopReason::Hook);
+                break;
+            }
+
+            match response.contents.last() {
+                Some(LanguageModelResponseContentType::ToolCall(_)) => (),
+                _ => {
+                    options.stop_reason = Some(StopReason::Finish);
+                    break;
+                }
+            };
         }
+
+        Ok(GenerateTextResponse { options })
     }
 }
 
@@ -102,22 +120,11 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
 // Section: response types
 // ============================================================================
 
-//TODO: add standard response fields
 /// Response from a generate call on `GenerateText`.
 #[derive(Debug, Clone)]
 pub struct GenerateTextResponse {
     /// The options that generated this response
-    pub options: LanguageModelOptions, // TODO: implement getters
-    /// The model that generated the response.
-    pub model: Option<String>,
-
-    /// The reason the model stopped generating text.
-    /// Might not necessaryly be an error. for errors, handle
-    /// the `Result::Err` variant associated with this type.
-    pub stop_reason: Option<String>,
-
-    /// Usage information of the last call
-    pub usage: Option<Usage>, // TODO: change to a function for total usage
+    options: LanguageModelOptions,
 }
 
 impl GenerateTextResponse {
@@ -135,8 +142,10 @@ impl GenerateTextResponse {
     }
 }
 
-impl LanguageModelResponseMethods for GenerateTextResponse {
-    fn options(&self) -> &LanguageModelOptions {
+impl Deref for GenerateTextResponse {
+    type Target = LanguageModelOptions;
+
+    fn deref(&self) -> &Self::Target {
         &self.options
     }
 }
@@ -146,7 +155,8 @@ mod tests {
     use super::*;
     use crate::core::{
         AssistantMessage, ToolCallInfo, ToolResultInfo,
-        language_model::LanguageModelResponseContentType, messages::TaggedMessage,
+        language_model::{LanguageModelResponseContentType, Usage},
+        messages::TaggedMessage,
     };
 
     #[test]
@@ -165,12 +175,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let response = GenerateTextResponse {
-            options,
-            model: None,
-            stop_reason: None,
-            usage: None,
-        };
+        let response = GenerateTextResponse { options };
 
         let step0 = response.step(0).unwrap();
         assert_eq!(step0.step_id, 0);
@@ -199,12 +204,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let response = GenerateTextResponse {
-            options,
-            model: None,
-            stop_reason: None,
-            usage: None,
-        };
+        let response = GenerateTextResponse { options };
 
         let final_step = response.last_step().unwrap();
         assert_eq!(final_step.step_id, 2);
@@ -234,12 +234,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let response = GenerateTextResponse {
-            options,
-            model: None,
-            stop_reason: None,
-            usage: None,
-        };
+        let response = GenerateTextResponse { options };
 
         let steps = response.steps();
         assert_eq!(steps.len(), 3);
@@ -285,12 +280,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let response = GenerateTextResponse {
-            options,
-            model: None,
-            stop_reason: None,
-            usage: None,
-        };
+        let response = GenerateTextResponse { options };
 
         let total_usage = response.usage();
         assert_eq!(total_usage.input_tokens, Some(15));
@@ -329,12 +319,7 @@ mod tests {
             messages,
             ..Default::default()
         };
-        GenerateTextResponse {
-            options,
-            model: None,
-            stop_reason: None,
-            usage: None,
-        }
+        GenerateTextResponse { options }
     }
 
     // Tests for GenerateTextResponse tool_calls()
@@ -439,7 +424,7 @@ mod tests {
     #[test]
     fn test_generate_text_response_tool_results_empty_messages() {
         let response = create_response_with_messages(vec![]);
-        assert_eq!(response.tool_results(), None);
+        assert!(response.tool_results().is_none());
     }
 
     #[test]
@@ -450,7 +435,7 @@ mod tests {
             create_text_assistant_message(0, "Assistant"),
         ];
         let response = create_response_with_messages(messages);
-        assert_eq!(response.tool_results(), None);
+        assert!(response.tool_results().is_none());
     }
 
     #[test]
@@ -501,7 +486,7 @@ mod tests {
             create_text_assistant_message(0, "Assistant"),
         ];
         let response = create_response_with_messages(messages);
-        assert_eq!(response.tool_results(), None);
+        assert!(response.tool_results().is_none());
     }
 
     #[test]

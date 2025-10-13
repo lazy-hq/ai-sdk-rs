@@ -187,7 +187,6 @@ impl Promptable for Prompt {
     }
 
     /// Adds a variable to the prompt, if it doesn't already exist.
-    /// TODO: implement different supportable types(like iterables) instead of just str
     fn with(mut self, variable: &str, value: &str) -> Self {
         if !self.variables.contains_key(variable) {
             self.variables

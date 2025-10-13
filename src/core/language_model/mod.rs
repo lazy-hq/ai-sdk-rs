@@ -44,6 +44,7 @@ pub const DEFAULT_TOOL_STEP_COUNT: usize = 3;
 /// generation and streaming responses.
 #[async_trait]
 pub trait LanguageModel: Send + Sync + std::fmt::Debug {
+    fn name(&self) -> String;
     /// Performs a single, non-streaming text generation request.
     ///
     /// This method sends a prompt to the model and returns the entire response at once.
@@ -63,137 +64,7 @@ pub trait LanguageModel: Send + Sync + std::fmt::Debug {
     /// # Errors
     ///
     /// Returns an `Error` if the API call fails or the request is invalid.
-    async fn stream_text(
-        &mut self,
-        options: LanguageModelOptions,
-    ) -> Result<LanguageModelStreamResponse>;
-}
-
-/// Common methods for types that contain collections of Messages
-pub trait StepMethods {
-    fn messages(&self) -> &[Message];
-
-    fn usage(&self) -> Usage {
-        self.messages()
-            .iter()
-            .filter_map(|m| match m {
-                Message::Assistant(AssistantMessage { usage, .. }) => usage.as_ref(),
-                _ => None,
-            })
-            .fold(Usage::default(), |acc, u| &acc + u)
-    }
-
-    fn tool_calls(&self) -> Option<Vec<ToolCallInfo>> {
-        let calls: Vec<ToolCallInfo> = self
-            .messages()
-            .iter()
-            .filter_map(|msg| match msg {
-                Message::Assistant(AssistantMessage {
-                    content: LanguageModelResponseContentType::ToolCall(info),
-                    ..
-                }) => Some(info.clone()),
-                _ => None,
-            })
-            .collect();
-        if calls.is_empty() { None } else { Some(calls) }
-    }
-
-    fn tool_results(&self) -> Option<Vec<ToolResultInfo>> {
-        let results: Vec<ToolResultInfo> = self
-            .messages()
-            .iter()
-            .filter_map(|msg| match msg {
-                Message::Tool(info) => Some(info.clone()),
-                _ => None,
-            })
-            .collect();
-        if results.is_empty() {
-            None
-        } else {
-            Some(results)
-        }
-    }
-}
-
-/// Common methods for response types that contain LanguageModelOptions
-pub trait LanguageModelResponseMethods {
-    fn options(&self) -> &LanguageModelOptions;
-
-    fn step(&self, index: usize) -> Option<Step> {
-        let messages: Vec<Message> = self
-            .options()
-            .messages
-            .iter()
-            .filter(|t| t.step_id == index)
-            .map(|t| t.message.clone())
-            .collect();
-        if messages.is_empty() {
-            None
-        } else {
-            Some(Step::new(index, messages))
-        }
-    }
-
-    fn last_step(&self) -> Option<Step> {
-        let max_step = self.options().messages.iter().map(|t| t.step_id).max()?;
-        self.step(max_step)
-    }
-
-    fn steps(&self) -> Vec<Step> {
-        let mut step_map: HashMap<usize, Vec<Message>> = HashMap::new();
-        for tagged in &self.options().messages {
-            step_map
-                .entry(tagged.step_id)
-                .or_default()
-                .push(tagged.message.clone());
-        }
-        let mut steps: Vec<Step> = step_map
-            .into_iter()
-            .map(|(id, msgs)| Step::new(id, msgs))
-            .collect();
-        steps.sort_by_key(|s| s.step_id);
-        steps
-    }
-
-    fn usage(&self) -> Usage {
-        self.steps()
-            .iter()
-            .map(|s| s.usage())
-            .fold(Usage::default(), |acc, u| &acc + &u)
-    }
-
-    fn content(&self) -> Option<&LanguageModelResponseContentType> {
-        if let Some(msg) = self.options().messages.last() {
-            match msg.message {
-                Message::Assistant(ref content) => Some(&content.content),
-                _ => None,
-            }
-        } else {
-            None
-        }
-    }
-
-    fn text(&self) -> Option<&String> {
-        if let Some(msg) = self.options().messages.last() {
-            match msg.message {
-                Message::Assistant(AssistantMessage {
-                    content: LanguageModelResponseContentType::Text(ref c),
-                    ..
-                }) => Some(c),
-                _ => None,
-            }
-        } else {
-            None
-        }
-    }
-
-    fn tool_results(&self) -> Option<Vec<ToolResultInfo>> {
-        self.options().messages.as_slice().extract_tool_results()
-    }
-
-    fn tool_calls(&self) -> Option<Vec<ToolCallInfo>> {
-        self.options().messages.as_slice().extract_tool_calls()
-    }
+    async fn stream_text(&mut self, options: LanguageModelOptions) -> Result<ProviderStream>;
 }
 
 // ============================================================================
@@ -214,16 +85,55 @@ pub struct Step {
     pub messages: Vec<Message>,
 }
 
-// TODO: explore options to use traits
 impl Step {
     pub fn new(step_id: usize, messages: Vec<Message>) -> Self {
         Self { step_id, messages }
     }
-}
 
-impl StepMethods for Step {
-    fn messages(&self) -> &[Message] {
+    pub fn messages(&self) -> &[Message] {
         &self.messages
+    }
+
+    pub fn usage(&self) -> Usage {
+        self.messages()
+            .iter()
+            .filter_map(|m| match m {
+                Message::Assistant(AssistantMessage { usage, .. }) => usage.as_ref(),
+                _ => None,
+            })
+            .fold(Usage::default(), |acc, u| &acc + u)
+    }
+
+    pub fn tool_calls(&self) -> Option<Vec<ToolCallInfo>> {
+        let calls: Vec<ToolCallInfo> = self
+            .messages()
+            .iter()
+            .filter_map(|msg| match msg {
+                Message::Assistant(AssistantMessage {
+                    content: LanguageModelResponseContentType::ToolCall(info),
+                    ..
+                }) => Some(Some(info.clone())),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        if calls.is_empty() { None } else { Some(calls) }
+    }
+
+    pub fn tool_results(&self) -> Option<Vec<ToolResultInfo>> {
+        let results: Vec<ToolResultInfo> = self
+            .messages()
+            .iter()
+            .filter_map(|msg| match msg {
+                Message::Tool(info) => Some(info.clone()),
+                _ => None,
+            })
+            .collect();
+        if results.is_empty() {
+            None
+        } else {
+            Some(results)
+        }
     }
 }
 
@@ -237,10 +147,6 @@ impl StepMethods for Step {
 pub struct LanguageModelOptions {
     /// System prompt to be used for the request.
     pub system: Option<String>,
-
-    /// The messages to generate text from.
-    /// At least User Message is required.
-    pub(crate) messages: Vec<TaggedMessage>,
 
     /// Output format schema.
     pub schema: Option<Schema>,
@@ -276,15 +182,6 @@ pub struct LanguageModelOptions {
     /// to repeatedly use the same words or phrases.
     pub frequency_penalty: Option<f32>,
 
-    /// Number tool call cycles to make
-    pub step_count: Option<usize>,
-
-    /// List of tools to use.
-    pub tools: Option<ToolList>,
-
-    /// Used to track message steps
-    pub(crate) current_step_id: usize,
-
     /// Hook to stop tool calling if returns true
     pub stop_when: Option<StopWhenHook>,
 
@@ -293,6 +190,19 @@ pub struct LanguageModelOptions {
 
     /// Hook called after each step finishes
     pub on_step_finish: Option<OnStepFinishHook>,
+
+    /// List of tools to use.
+    pub(crate) tools: Option<ToolList>,
+
+    /// Used to track message steps
+    pub(crate) current_step_id: usize,
+
+    /// The messages to generate text from.
+    /// At least User Message is required.
+    pub(crate) messages: Vec<TaggedMessage>,
+
+    // The stop reasons. should be updated after each step.
+    pub(crate) stop_reason: Option<StopReason>,
 }
 
 impl Debug for LanguageModelOptions {
@@ -310,7 +220,6 @@ impl Debug for LanguageModelOptions {
             .field("stop_sequences", &self.stop_sequences)
             .field("presence_penalty", &self.presence_penalty)
             .field("frequency_penalty", &self.frequency_penalty)
-            .field("step_count", &self.step_count)
             .field("tools", &self.tools)
             .field("current_step_id", &self.current_step_id)
             .field("stop_when", &self.stop_when.is_some())
@@ -328,6 +237,119 @@ impl LanguageModelOptions {
     pub fn messages(&self) -> Vec<Message> {
         self.messages.iter().map(|m| m.message.clone()).collect()
     }
+
+    /// Calls the requested tools, adds tool ouput message to messages,
+    /// and decrements the step count. uses the previous step id for tagging
+    /// the created messages.
+    pub(crate) async fn handle_tool_call(&mut self, input: &ToolCallInfo) -> &mut Self {
+        if let Some(tools) = &self.tools {
+            let tool_result_task = tools.execute(input.clone()).await;
+            let tool_result = tool_result_task
+                .await
+                .map_err(|err| Error::ToolCallError(format!("Error executing tool: {}", err)))
+                .and_then(|result| result);
+
+            let mut tool_output_infos = Vec::new();
+
+            let mut tool_output_info = ToolResultInfo::new(&input.tool.name);
+            let output = match tool_result {
+                Ok(result) => serde_json::Value::String(result),
+                Err(err) => serde_json::Value::String(format!("Error: {}", err)),
+            };
+            tool_output_info.output(output);
+            tool_output_info.id(&input.tool.id);
+            tool_output_infos.push(tool_output_info.clone());
+
+            // update messages
+            self.messages.push(TaggedMessage::new(
+                self.current_step_id,
+                Message::Tool(tool_output_info),
+            ));
+
+            self
+        } else {
+            self
+        }
+    }
+
+    pub fn step(&self, index: usize) -> Option<Step> {
+        let messages: Vec<Message> = self
+            .messages
+            .iter()
+            .filter(|t| t.step_id == index)
+            .map(|t| t.message.clone())
+            .collect();
+        if messages.is_empty() {
+            None
+        } else {
+            Some(Step::new(index, messages))
+        }
+    }
+
+    pub fn last_step(&self) -> Option<Step> {
+        let max_step = self.messages.iter().map(|t| t.step_id).max()?;
+        self.step(max_step)
+    }
+
+    pub fn steps(&self) -> Vec<Step> {
+        let mut step_map: HashMap<usize, Vec<Message>> = HashMap::new();
+        for tagged in &self.messages {
+            step_map
+                .entry(tagged.step_id)
+                .or_default()
+                .push(tagged.message.clone());
+        }
+        let mut steps: Vec<Step> = step_map
+            .into_iter()
+            .map(|(id, msgs)| Step::new(id, msgs))
+            .collect();
+        steps.sort_by_key(|s| s.step_id);
+        steps
+    }
+
+    pub fn usage(&self) -> Usage {
+        self.steps()
+            .iter()
+            .map(|s| s.usage())
+            .fold(Usage::default(), |acc, u| &acc + &u)
+    }
+
+    pub fn content(&self) -> Option<&LanguageModelResponseContentType> {
+        if let Some(msg) = self.messages.last() {
+            match msg.message {
+                Message::Assistant(ref assistant_msg) => Some(&assistant_msg.content),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn text(&self) -> Option<String> {
+        if let Some(msg) = self.messages.last() {
+            match msg.message {
+                Message::Assistant(AssistantMessage {
+                    content: LanguageModelResponseContentType::Text(ref text),
+                    ..
+                }) => Some(text.clone()),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn tool_results(&self) -> Option<Vec<ToolResultInfo>> {
+        self.messages.as_slice().extract_tool_results()
+    }
+
+    pub fn tool_calls(&self) -> Option<Vec<ToolCallInfo>> {
+        self.messages.as_slice().extract_tool_calls()
+    }
+
+    pub fn stop_reason(&self) -> Option<StopReason> {
+        self.stop_reason.clone()
+    }
 }
 
 // ============================================================================
@@ -338,6 +360,7 @@ impl LanguageModelOptions {
 pub enum LanguageModelResponseContentType {
     Text(String),
     ToolCall(ToolCallInfo),
+    NotSupported(String),
 }
 
 impl Default for LanguageModelResponseContentType {
@@ -381,20 +404,11 @@ impl Add for &Usage {
     }
 }
 
-// TODO: constract a standard response type
 /// Response from a language model.
 #[derive(Debug, Clone)]
 pub struct LanguageModelResponse {
-    /// The generated text.
-    pub content: LanguageModelResponseContentType,
-
-    /// The model that generated the response.
-    pub model: Option<String>,
-
-    /// The reason the model stopped generating text.
-    /// Might not necessaryly be an error. for errors, handle
-    /// the `Result::Err` variant associated with this type.
-    pub stop_reason: Option<String>,
+    /// The generated contents (supports multiple outputs).
+    pub contents: Vec<LanguageModelResponseContentType>,
 
     /// Usage information
     pub usage: Option<Usage>,
@@ -404,9 +418,7 @@ impl LanguageModelResponse {
     /// Creates a new response with the generated text.
     pub fn new(text: impl Into<String>) -> Self {
         Self {
-            content: LanguageModelResponseContentType::new(text.into()),
-            model: None,
-            stop_reason: None,
+            contents: vec![LanguageModelResponseContentType::new(text.into())],
             usage: None,
         }
     }
@@ -423,40 +435,39 @@ pub enum LanguageModelStreamChunkType {
     ToolCall(String),
     /// The model has stopped generating text successfully.
     End(AssistantMessage),
-    /// The model has failed to generate text.
-    Failed(String), // TODO: add a type to accomodate provider and aisdk errors
+    /// The model has failed to generate text. error specified by
+    /// the language model
+    Failed(String),
     /// The model finsished generating text with incomplete response.
-    Incomplete(String), // TODO: replace with StopReason
+    Incomplete(String),
     /// Return this for unimplemented features for a specific model.
     NotSupported(String),
 }
 
-/// Stream of responses from mapped to a common interface.
-pub type LanguageModelStream =
-    Pin<Box<dyn Stream<Item = Result<LanguageModelStreamChunkType>> + Send>>;
-
-/// A response from a streaming language model provider.
-pub struct LanguageModelStreamResponse {
-    /// A stream of responses from the language model.
-    pub stream: LanguageModelStream,
-    /// The model that generated the response.
-    pub model: Option<String>,
+#[derive(Debug, Clone)]
+pub enum LanguageModelStreamChunk {
+    Delta(LanguageModelStreamChunkType),
+    Done(AssistantMessage),
 }
 
-// Struct wrapper for MPMC channel to act as a stream
-pub struct MpmcStream {
+/// A common interface for stream responses generated by providers (e.g. OpenAI)
+pub(crate) type ProviderStream =
+    Pin<Box<dyn Stream<Item = Result<Vec<LanguageModelStreamChunk>>> + Send>>;
+
+// A mapping of `ProviderStream` to a channel like stream.
+pub struct LanguageModelStream {
     receiver: Receiver<LanguageModelStreamChunkType>,
 }
 
-impl MpmcStream {
+impl LanguageModelStream {
     // Creates a new MpmcStream with an associated Sender
-    pub fn new() -> (Sender<LanguageModelStreamChunkType>, MpmcStream) {
+    pub fn new() -> (Sender<LanguageModelStreamChunkType>, LanguageModelStream) {
         let (tx, rx) = mpsc::channel();
-        (tx, MpmcStream { receiver: rx })
+        (tx, LanguageModelStream { receiver: rx })
     }
 }
 
-impl Stream for MpmcStream {
+impl Stream for LanguageModelStream {
     type Item = LanguageModelStreamChunkType;
 
     fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -466,6 +477,22 @@ impl Stream for MpmcStream {
             Err(mpsc::TryRecvError::Disconnected) => Poll::Ready(None),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum StopReason {
+    #[default]
+    // The model has finished generating text
+    Finish,
+    // Provider specific reasons like timeout, rate limit etc
+    Provider(String),
+    // The user has explicitly provided a hook causing to stop
+    Hook,
+    // Problematic errors. Providers specific errors can be accessed
+    // through `Error::ProviderError`
+    Error(Error),
+    // Anything that is not supported by the above reasons
+    Other(String),
 }
 
 #[cfg(test)]
@@ -752,7 +779,7 @@ mod tests {
     #[test]
     fn test_step_tool_results_empty_messages() {
         let step = Step::new(0, vec![]);
-        assert_eq!(step.tool_results(), None);
+        assert!(step.tool_results().is_none());
     }
 
     #[test]
@@ -766,7 +793,7 @@ mod tests {
             }),
         ];
         let step = Step::new(0, messages);
-        assert_eq!(step.tool_results(), None);
+        assert!(step.tool_results().is_none());
     }
 
     #[test]
@@ -823,7 +850,7 @@ mod tests {
             }),
         ];
         let step = Step::new(0, messages);
-        assert_eq!(step.tool_results(), None);
+        assert!(step.tool_results().is_none());
     }
 
     #[test]

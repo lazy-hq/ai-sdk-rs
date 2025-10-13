@@ -7,6 +7,44 @@ use syn::{
 };
 
 #[proc_macro_attribute]
+/// Constructs a tool from a function defnition. A tool has a name, a description,
+/// an input and a body. all three components are infered from a standard rust
+/// function. The name is the defined name of the function,
+/// The description is infered from the doc comments of the function, The input
+/// infered from the function arguments.
+///
+/// # Example
+///
+/// ```rust
+/// #[tool]
+/// /// Returns the username
+/// fn get_username(id: String) {
+///     // Your code here
+/// }
+/// ```
+///
+/// - `get_username` becomes the name of the tool
+/// - `Returns the username` becomes the description of the tool
+/// - `id: String` becomes the input of the tool. converted to `{"id": "string"}`
+/// as json schema
+///
+/// In the event that the model refuses to send an argument, the default implementation
+/// will be used. this works perfectly for arguments that are `Option`s. Make sure to
+/// use `Option` types for arguments that are optional or implement a default for those
+/// that are not and handle those defaults accordingly in the tool body.
+///
+/// You can override name and description using the macro arguments `name` and `desc`.
+///
+/// # Example with overrides
+/// ```rust
+///     #[tool(
+///         name = "the-name-for-this-tool",
+///         desc = "the-description-for-this-tool"
+///     )]
+///     fn get_username(id: String) {
+///         // Your code here
+///     }
+/// ```
 pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let input_fn = parse_macro_input!(item as ItemFn);
     let fn_name = &input_fn.sig.ident;
@@ -79,27 +117,31 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
         fn_name.to_string()
     };
 
-    let binding_tokens: Vec<_> = inputs.iter().filter_map(|arg| {
-        if let FnArg::Typed(pat_type) = arg {
-            if let Pat::Ident(pat_ident) = &*pat_type.pat {
-                let ident = &pat_ident.ident;
-                let ty = &*pat_type.ty;
-                let ident_str = ident.to_string();
-                Some(quote! {
-                    let #ident: #ty = serde_json::from_value(
-                        inp.as_object_mut().unwrap().remove(#ident_str) // TODO: unnecessary unwrap
-                            .unwrap_or_else(|| todo!("Missing required parameter: {}", #ident_str))
-                    ).unwrap_or_else(|e| {
-                        todo!("Failed to deserialize {}: {}", #ident_str, e)
-                    });
-                })
+    let binding_tokens: Vec<_> = inputs
+        .iter()
+        .filter_map(|arg| {
+            if let FnArg::Typed(pat_type) = arg {
+                if let Pat::Ident(pat_ident) = &*pat_type.pat {
+                    let ident = &pat_ident.ident;
+                    let ty = &*pat_type.ty;
+                    let ident_str = ident.to_string();
+                    Some(quote! {
+                        let #ident: #ty = serde_json::from_value(
+                            inp.as_object()
+                                .unwrap()
+                                .get(#ident_str)
+                                .unwrap()
+                                .clone()
+                        ).unwrap_or_default();  // use default value if model doesn't send arg
+                    })
+                } else {
+                    None
+                }
             } else {
                 None
             }
-        } else {
-            None
-        }
-    }).collect();
+        })
+        .collect();
 
     // Generate the struct definition
     let struct_fields = inputs.iter().filter_map(|arg| {
@@ -117,12 +159,8 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
     });
 
     let expanded = quote! {
-        // TODO: If there is a way to remove the usage of Tool and ToolExecute here it would be
-        // nice. currently the user has to import these types.
         #[allow(unused_variables)]
         #vis fn #fn_name() -> Tool {
-            // TODO: There is a possibiltiy to run schema genration during compile time here.
-            // This will potentiolly remove the need for additional runtime dependency.
             use schemars::{schema_for, JsonSchema, Schema};
             use std::collections::HashMap;
 
@@ -141,9 +179,7 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
             tool.name = #name.to_string();
             tool.description = #description.to_string();
             tool.input_schema = input_schema;
-            tool.execute = ToolExecute::new(Box::new(|mut inp| -> std::result::Result<String, String> {
-                // TODO: Do `input_schema` validation on inp
-                // Extract all parameters from the HashMap here
+            tool.execute = ToolExecute::new(Box::new(|inp| -> std::result::Result<String, String> {
                 #(#binding_tokens)*
                 #block
             }));
