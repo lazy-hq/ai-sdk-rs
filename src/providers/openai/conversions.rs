@@ -1,13 +1,16 @@
 //! Helper functions and conversions for the OpenAI provider.
 
-use crate::core::language_model::{LanguageModelOptions, LanguageModelResponseContentType, Usage};
+use crate::core::language_model::{
+    LanguageModelOptions, LanguageModelResponseContentType, ReasoningEffort, Usage,
+};
 use crate::core::messages::Message;
 use crate::core::tools::Tool;
-use async_openai::types::ResponseFormatJsonSchema;
 use async_openai::types::responses::{
-    CreateResponse, Function, Input, InputContent, InputItem, InputMessage, InputMessageType, Role,
-    TextConfig, TextResponseFormat, ToolDefinition, Usage as OpenAIUsage,
+    CreateResponse, Function, Input, InputContent, InputItem, InputMessage, InputMessageType,
+    ReasoningConfig, ReasoningSummary, Role, TextConfig, TextResponseFormat, ToolDefinition,
+    Usage as OpenAIUsage,
 };
+use async_openai::types::{ReasoningEffort as OpenAIReasoningEffort, ResponseFormatJsonSchema};
 use schemars::Schema;
 use serde_json::Value;
 
@@ -63,6 +66,11 @@ impl From<LanguageModelOptions> for CreateResponse {
                 .collect()
         });
 
+        let reasoning = options.reasoning_effort.map(|reasoning| ReasoningConfig {
+            summary: Some(ReasoningSummary::Auto),
+            effort: Some(reasoning.into()),
+        });
+
         CreateResponse {
             input: Input::Items(items),
             text: Some(TextConfig {
@@ -72,6 +80,7 @@ impl From<LanguageModelOptions> for CreateResponse {
                     .map(TextResponseFormat::JsonSchema)
                     .unwrap_or(TextResponseFormat::Text),
             }),
+            reasoning,
             temperature: options.temperature.map(|t| t as f32 / 100.0),
             max_output_tokens: options.max_output_tokens,
             stream: Some(false),
@@ -115,6 +124,17 @@ impl From<Message> for Option<InputItem> {
                     custom_msg["type"] = Value::String("function_call".to_string());
                     Some(InputItem::Custom(custom_msg))
                 }
+                LanguageModelResponseContentType::Reasoning(ref reason) => {
+                    let mut custom_msg = Value::Object(serde_json::Map::new());
+                    let mut summary = Value::Object(serde_json::Map::new());
+                    summary["type"] = Value::String("summary_text".to_string());
+                    summary["text"] = Value::String(reason.clone());
+
+                    custom_msg["type"] = Value::String("reasoning".to_string());
+                    custom_msg["summary"] = summary;
+
+                    Some(InputItem::Custom(custom_msg))
+                }
                 _ => None,
             },
             Message::User(u) => {
@@ -150,6 +170,16 @@ impl From<OpenAIUsage> for Usage {
     }
 }
 
+impl From<ReasoningEffort> for OpenAIReasoningEffort {
+    fn from(value: ReasoningEffort) -> Self {
+        match value {
+            ReasoningEffort::Low => OpenAIReasoningEffort::Minimal,
+            ReasoningEffort::Medium => OpenAIReasoningEffort::Medium,
+            ReasoningEffort::High => OpenAIReasoningEffort::High,
+        }
+    }
+}
+
 fn from_schema_to_response_format(schema: Schema) -> ResponseFormatJsonSchema {
     let json = serde_json::to_value(schema).expect("Failed to serialize schema");
     ResponseFormatJsonSchema {
@@ -164,5 +194,129 @@ fn from_schema_to_response_format(schema: Schema) -> ResponseFormatJsonSchema {
             .map(str::to_owned),
         schema: Some(json),
         strict: Some(false),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::language_model::{LanguageModelOptions, ReasoningEffort, Usage};
+    use crate::core::messages::{AssistantMessage, Message};
+
+    #[test]
+    fn test_reasoning_effort_conversion_low() {
+        let effort = ReasoningEffort::Low;
+        let openai_effort: OpenAIReasoningEffort = effort.into();
+        // We can't directly compare enum variants from external crate,
+        // but we can verify the conversion doesn't panic and returns a valid value
+        let _ = openai_effort;
+    }
+
+    #[test]
+    fn test_reasoning_effort_conversion_medium() {
+        let effort = ReasoningEffort::Medium;
+        let openai_effort: OpenAIReasoningEffort = effort.into();
+        let _ = openai_effort;
+    }
+
+    #[test]
+    fn test_reasoning_effort_conversion_high() {
+        let effort = ReasoningEffort::High;
+        let openai_effort: OpenAIReasoningEffort = effort.into();
+        let _ = openai_effort;
+    }
+
+    #[test]
+    fn test_language_model_options_to_create_response_with_reasoning_effort_low() {
+        let options = LanguageModelOptions {
+            reasoning_effort: Some(ReasoningEffort::Low),
+            ..Default::default()
+        };
+        let create_response: CreateResponse = options.into();
+        assert!(create_response.reasoning.is_some());
+        let reasoning = create_response.reasoning.unwrap();
+        assert_eq!(reasoning.effort, Some(OpenAIReasoningEffort::Minimal));
+        assert_eq!(reasoning.summary, Some(ReasoningSummary::Auto));
+    }
+
+    #[test]
+    fn test_language_model_options_to_create_response_with_reasoning_effort_medium() {
+        let options = LanguageModelOptions {
+            reasoning_effort: Some(ReasoningEffort::Medium),
+            ..Default::default()
+        };
+        let create_response: CreateResponse = options.into();
+        assert!(create_response.reasoning.is_some());
+        let reasoning = create_response.reasoning.unwrap();
+        assert_eq!(reasoning.effort, Some(OpenAIReasoningEffort::Medium));
+        assert_eq!(reasoning.summary, Some(ReasoningSummary::Auto));
+    }
+
+    #[test]
+    fn test_language_model_options_to_create_response_with_reasoning_effort_high() {
+        let options = LanguageModelOptions {
+            reasoning_effort: Some(ReasoningEffort::High),
+            ..Default::default()
+        };
+        let create_response: CreateResponse = options.into();
+        assert!(create_response.reasoning.is_some());
+        let reasoning = create_response.reasoning.unwrap();
+        assert_eq!(reasoning.effort, Some(OpenAIReasoningEffort::High));
+        assert_eq!(reasoning.summary, Some(ReasoningSummary::Auto));
+    }
+
+    #[test]
+    fn test_language_model_options_to_create_response_without_reasoning_effort() {
+        let options = LanguageModelOptions {
+            reasoning_effort: None,
+            ..Default::default()
+        };
+        let create_response: CreateResponse = options.into();
+        assert!(create_response.reasoning.is_none());
+    }
+
+    #[test]
+    fn test_openai_usage_to_usage_conversion() {
+        use async_openai::types::responses::Usage as OpenAIUsage;
+
+        let openai_usage = OpenAIUsage {
+            input_tokens: 100,
+            output_tokens: 50,
+            total_tokens: 150,
+            input_tokens_details: Default::default(),
+            output_tokens_details: Default::default(),
+        };
+
+        let usage: Usage = openai_usage.into();
+        assert_eq!(usage.input_tokens, Some(100));
+        assert_eq!(usage.output_tokens, Some(50));
+        assert_eq!(usage.total_tokens, Some(150));
+        // These will be 0 because the details are default (None)
+        assert_eq!(usage.cached_tokens, Some(0));
+        assert_eq!(usage.reasoning_tokens, Some(0));
+    }
+
+    #[test]
+    fn test_assistant_message_with_reasoning_content_conversion() {
+        let assistant_msg = AssistantMessage {
+            content: LanguageModelResponseContentType::Reasoning(
+                "This is my reasoning".to_string(),
+            ),
+            usage: None,
+        };
+        let message = Message::Assistant(assistant_msg);
+
+        let input_item: Option<InputItem> = message.into();
+        assert!(input_item.is_some());
+
+        if let Some(InputItem::Custom(custom_msg)) = input_item {
+            assert_eq!(custom_msg["type"], "reasoning");
+            assert!(custom_msg["summary"].is_object());
+            let summary = custom_msg["summary"].as_object().unwrap();
+            assert_eq!(summary["type"], "summary_text");
+            assert_eq!(summary["text"], "This is my reasoning");
+        } else {
+            panic!("Expected Custom InputItem");
+        }
     }
 }

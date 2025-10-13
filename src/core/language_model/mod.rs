@@ -191,6 +191,9 @@ pub struct LanguageModelOptions {
     /// Hook called after each step finishes
     pub on_step_finish: Option<OnStepFinishHook>,
 
+    /// Reasoning effort
+    pub reasoning_effort: Option<ReasoningEffort>,
+
     /// List of tools to use.
     pub(crate) tools: Option<ToolList>,
 
@@ -317,7 +320,13 @@ impl LanguageModelOptions {
     pub fn content(&self) -> Option<&LanguageModelResponseContentType> {
         if let Some(msg) = self.messages.last() {
             match msg.message {
-                Message::Assistant(ref assistant_msg) => Some(&assistant_msg.content),
+                Message::Assistant(ref assistant_msg) => {
+                    if let LanguageModelResponseContentType::Reasoning(_) = assistant_msg.content {
+                        None
+                    } else {
+                        Some(&assistant_msg.content)
+                    }
+                }
                 _ => None,
             }
         } else {
@@ -360,6 +369,7 @@ impl LanguageModelOptions {
 pub enum LanguageModelResponseContentType {
     Text(String),
     ToolCall(ToolCallInfo),
+    Reasoning(String),
     NotSupported(String),
 }
 
@@ -493,6 +503,16 @@ pub enum StopReason {
     Error(Error),
     // Anything that is not supported by the above reasons
     Other(String),
+}
+
+// will be converted to the appropriate level of reasoning
+// for a language model
+#[derive(Debug, Clone, Copy, Default)]
+pub enum ReasoningEffort {
+    #[default]
+    Low,
+    Medium,
+    High,
 }
 
 #[cfg(test)]

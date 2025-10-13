@@ -66,6 +66,15 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
                             .messages
                             .push(TaggedMessage::new(options.current_step_id, assistant_msg));
                     }
+                    LanguageModelResponseContentType::Reasoning(reason) => {
+                        let assistant_msg = Message::Assistant(AssistantMessage {
+                            content: reason.clone().into(),
+                            usage: response.usage.clone(),
+                        });
+                        options
+                            .messages
+                            .push(TaggedMessage::new(options.current_step_id, assistant_msg));
+                    }
                     LanguageModelResponseContentType::ToolCall(tool_info) => {
                         // add tool message
                         let usage = response.usage.clone();
@@ -76,7 +85,6 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
                                 usage,
                             )),
                         ));
-
                         options.handle_tool_call(tool_info).await;
                     }
                     _ => (),

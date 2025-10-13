@@ -242,6 +242,14 @@ impl<M: LanguageModel> LanguageModelRequestBuilder<M, OptionsStage> {
         self
     }
 
+    pub fn reasoning_effort(
+        mut self,
+        reasoning_effort: impl Into<crate::core::language_model::ReasoningEffort>,
+    ) -> Self {
+        self.reasoning_effort = Some(reasoning_effort.into());
+        self
+    }
+
     pub fn build(self) -> LanguageModelRequest<M> {
         let model = self
             .model
