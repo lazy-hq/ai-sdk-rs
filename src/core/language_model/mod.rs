@@ -149,10 +149,6 @@ pub struct LanguageModelOptions {
     /// System prompt to be used for the request.
     pub system: Option<String>,
 
-    /// The messages to generate text from.
-    /// At least User Message is required.
-    pub(crate) messages: Vec<TaggedMessage>,
-
     /// Output format schema.
     pub schema: Option<Schema>,
 
@@ -187,12 +183,6 @@ pub struct LanguageModelOptions {
     /// to repeatedly use the same words or phrases.
     pub frequency_penalty: Option<f32>,
 
-    /// List of tools to use.
-    pub(crate) tools: Option<ToolList>,
-
-    /// Used to track message steps
-    pub(crate) current_step_id: usize,
-
     /// Hook to stop tool calling if returns true
     pub stop_when: Option<StopWhenHook>,
 
@@ -201,6 +191,19 @@ pub struct LanguageModelOptions {
 
     /// Hook called after each step finishes
     pub on_step_finish: Option<OnStepFinishHook>,
+
+    /// List of tools to use.
+    pub(crate) tools: Option<ToolList>,
+
+    /// Used to track message steps
+    pub(crate) current_step_id: usize,
+
+    /// The messages to generate text from.
+    /// At least User Message is required.
+    pub(crate) messages: Vec<TaggedMessage>,
+
+    // The stop reasons. should be updated after each step.
+    pub(crate) stop_reason: Option<StopReason>,
 }
 
 impl Debug for LanguageModelOptions {
@@ -344,6 +347,10 @@ impl LanguageModelOptions {
     pub fn tool_calls(&self) -> Option<Vec<ToolCallInfo>> {
         self.messages.as_slice().extract_tool_calls()
     }
+
+    pub fn stop_reason(&self) -> Option<StopReason> {
+        self.stop_reason.clone()
+    }
 }
 
 // ============================================================================
@@ -405,14 +412,6 @@ pub struct LanguageModelResponse {
     /// The generated contents (supports multiple outputs).
     pub contents: Vec<LanguageModelResponseContentType>,
 
-    /// The model that generated the response.
-    pub model: Option<String>,
-
-    /// The reason the model stopped generating text.
-    /// Might not necessaryly be an error. for errors, handle
-    /// the `Result::Err` variant associated with this type.
-    pub stop_reason: Option<String>,
-
     /// Usage information
     pub usage: Option<Usage>,
 }
@@ -422,8 +421,6 @@ impl LanguageModelResponse {
     pub fn new(text: impl Into<String>) -> Self {
         Self {
             contents: vec![LanguageModelResponseContentType::new(text.into())],
-            model: None,
-            stop_reason: None,
             usage: None,
         }
     }
@@ -481,6 +478,23 @@ impl Stream for LanguageModelStream {
             Err(mpsc::TryRecvError::Disconnected) => Poll::Ready(None),
         }
     }
+}
+
+// TODO: support Length, ContentFilter, ToolCalls, Error
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum StopReason {
+    #[default]
+    // The model has finished generating text
+    Finish,
+    // Provider specific reasons like timeout, rate limit etc
+    Provider(String),
+    // The user has explicitly provided a hook causing to stop
+    Hook,
+    // Problematic errors. Providers specific errors can be accessed
+    // through `Error::ProviderError`
+    Error(Error),
+    // Anything that is not supported by the above reasons
+    Other(String),
 }
 
 #[cfg(test)]

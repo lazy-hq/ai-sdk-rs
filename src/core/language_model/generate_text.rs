@@ -1,13 +1,16 @@
-use crate::core::{
-    AssistantMessage, Message,
-    language_model::{
-        LanguageModel, LanguageModelOptions, LanguageModelResponse,
-        LanguageModelResponseContentType, request::LanguageModelRequest,
-    },
-    messages::TaggedMessage,
-    utils::resolve_message,
-};
 use crate::error::Result;
+use crate::{
+    Error,
+    core::{
+        AssistantMessage, Message,
+        language_model::{
+            LanguageModel, LanguageModelOptions, LanguageModelResponse,
+            LanguageModelResponseContentType, StopReason, request::LanguageModelRequest,
+        },
+        messages::TaggedMessage,
+        utils::resolve_message,
+    },
+};
 use serde::de::DeserializeOwned;
 use serde::ser::Error as SerdeError;
 use std::ops::Deref;
@@ -31,6 +34,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
             stop_when: self.options.stop_when.clone(),
             prepare_step: self.options.prepare_step.clone(),
             on_step_finish: self.options.on_step_finish.clone(),
+            stop_reason: None,
             ..self.options
         };
 
@@ -43,7 +47,13 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
                 hook(&mut options);
             }
 
-            let response: LanguageModelResponse = self.model.generate_text(options.clone()).await?;
+            let response: LanguageModelResponse = self
+                .model
+                .generate_text(options.clone())
+                .await
+                .inspect_err(|e| {
+                options.stop_reason = Some(StopReason::Error(e.clone()));
+            })?;
 
             for output in response.contents.iter() {
                 match output {
@@ -79,6 +89,9 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
             };
 
             if response.contents.is_empty() {
+                options.stop_reason = Some(StopReason::Error(Error::Other(
+                    "Language model returned empty response".to_string(),
+                )));
                 break;
             }
 
@@ -86,12 +99,16 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
             if let Some(hook) = &options.stop_when.clone()
                 && hook(&options)
             {
+                options.stop_reason = Some(StopReason::Hook);
                 break;
             }
 
             match response.contents.last() {
                 Some(LanguageModelResponseContentType::ToolCall(_)) => (),
-                _ => break,
+                _ => {
+                    options.stop_reason = Some(StopReason::Finish);
+                    break;
+                }
             };
         }
 

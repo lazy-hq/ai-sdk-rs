@@ -95,9 +95,7 @@ impl LanguageModel for OpenAI {
         }
 
         Ok(LanguageModelResponse {
-            model: Some(response.model.to_string()),
             contents: collected,
-            stop_reason: None,
             usage: response.usage.map(|usage| usage.into()),
         })
     }

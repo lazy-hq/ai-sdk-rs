@@ -2,7 +2,7 @@ use crate::core::{
     AssistantMessage, LanguageModelStreamChunkType, Message,
     language_model::{
         LanguageModel, LanguageModelOptions, LanguageModelResponseContentType, LanguageModelStream,
-        LanguageModelStreamChunk, request::LanguageModelRequest,
+        LanguageModelStreamChunk, StopReason, request::LanguageModelRequest,
     },
     messages::TaggedMessage,
     utils::resolve_message,
@@ -30,6 +30,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
             stop_when: self.options.stop_when.clone(),
             prepare_step: self.options.prepare_step.clone(),
             on_step_finish: self.options.on_step_finish.clone(),
+            stop_reason: None,
             ..self.options
         };
 
@@ -45,13 +46,17 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
                 hook(&mut options);
             }
 
-            let mut response = self.model.stream_text(options.clone()).await?;
-            let mut should_exit = false;
+            let mut response = self
+                .model
+                .stream_text(options.clone())
+                .await
+                .inspect_err(|e| {
+                    options.stop_reason = Some(StopReason::Error(e.clone()));
+                })?;
 
             while let Some(ref chunk) = response.next().await {
                 match chunk {
                     Ok(chunk) => {
-                        println!("Chunk: {:#?}", chunk);
                         for output in chunk {
                             match output {
                                 LanguageModelStreamChunk::Done(final_msg) => {
@@ -66,9 +71,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
                                                 options.current_step_id,
                                                 assistant_msg,
                                             ));
-
-                                            eprintln!("Final Message: {:#?}", final_msg);
-                                            should_exit = true;
+                                            options.stop_reason = Some(StopReason::Finish);
                                         }
                                         LanguageModelResponseContentType::ToolCall(
                                             ref tool_info,
@@ -101,7 +104,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
                                         let _ = tx.send(LanguageModelStreamChunkType::Incomplete(
                                             "Stopped by hook".to_string(),
                                         ));
-                                        should_exit = true;
+                                        options.stop_reason = Some(StopReason::Hook);
                                         break;
                                     }
 
@@ -116,19 +119,21 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
                     }
                     Err(e) => {
                         let _ = tx.send(LanguageModelStreamChunkType::Failed(e.to_string()));
-                        should_exit = true;
+                        options.stop_reason = Some(StopReason::Error(e.clone()));
                         break;
                     }
                 }
-                if should_exit {
-                    eprintln!("Should exit");
-                    break;
-                }
+
+                match options.stop_reason {
+                    None => {}
+                    _ => break,
+                };
             }
-            if should_exit {
-                eprintln!("Should exit 2");
-                break;
-            }
+
+            match options.stop_reason {
+                None => {}
+                _ => break,
+            };
         }
 
         drop(tx);
@@ -143,7 +148,6 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
 // Section: response types
 // ============================================================================
 
-// TODO: add standard response fields
 // Response from a stream call on `StreamText`.
 pub struct StreamTextResponse {
     /// A stream of responses from the language model.
