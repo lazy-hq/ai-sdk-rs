@@ -1,14 +1,15 @@
 use crate::core::{
-    AssistantMessage, LanguageModelStreamChunkType, Message, ToolCallInfo, ToolResultInfo,
+    AssistantMessage, LanguageModelStreamChunkType, Message,
     language_model::{
         LanguageModel, LanguageModelOptions, LanguageModelResponseContentType, LanguageModelStream,
-        LanguageModelStreamChunk, Step, Usage, request::LanguageModelRequest,
+        LanguageModelStreamChunk, request::LanguageModelRequest,
     },
     messages::TaggedMessage,
     utils::resolve_message,
 };
 use crate::error::Result;
 use futures::StreamExt;
+use std::ops::Deref;
 
 impl<M: LanguageModel> LanguageModelRequest<M> {
     /// Generates Streaming text using a specified language model.
@@ -156,36 +157,12 @@ impl StreamTextResponse {
     pub fn step_ids(&self) -> Vec<usize> {
         self.options.messages.iter().map(|t| t.step_id).collect()
     }
+}
 
-    pub fn step(&self, index: usize) -> Option<Step> {
-        self.options.step(index)
-    }
+impl Deref for StreamTextResponse {
+    type Target = LanguageModelOptions;
 
-    pub fn last_step(&self) -> Option<Step> {
-        self.options.last_step()
-    }
-
-    pub fn steps(&self) -> Vec<Step> {
-        self.options.steps()
-    }
-
-    pub fn usage(&self) -> Usage {
-        self.options.usage()
-    }
-
-    pub fn content(&self) -> Option<&LanguageModelResponseContentType> {
-        self.options.content()
-    }
-
-    pub fn text(&self) -> Option<String> {
-        self.options.text()
-    }
-
-    pub fn tool_results(&self) -> Option<Vec<ToolResultInfo>> {
-        self.options.tool_results()
-    }
-
-    pub fn tool_calls(&self) -> Option<Vec<ToolCallInfo>> {
-        self.options.tool_calls()
+    fn deref(&self) -> &Self::Target {
+        &self.options
     }
 }
