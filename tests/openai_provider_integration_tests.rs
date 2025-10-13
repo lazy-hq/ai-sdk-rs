@@ -37,10 +37,12 @@ async fn test_generate_text_with_openai() {
 
     let text = result
         .as_ref()
-        .expect("Failed to get result")
+        .expect("")
         .text()
         .unwrap()
-        .trim();
+        .trim()
+        .to_string();
+
     assert!(text.contains("hello"));
 }
 
@@ -110,7 +112,8 @@ async fn test_generate_text_with_system_prompt() {
         .expect("Failed to get result")
         .text()
         .unwrap()
-        .trim();
+        .trim()
+        .to_string();
     assert!(text.contains("hello"));
 }
 
@@ -151,7 +154,8 @@ async fn test_generate_text_with_messages() {
         .expect("Failed to get result")
         .text()
         .unwrap()
-        .trim();
+        .trim()
+        .to_string();
     assert!(text.contains("Surafel"));
 }
 
@@ -187,7 +191,8 @@ async fn test_generate_text_with_messages_and_system_prompt() {
         .expect("Failed to get result")
         .text()
         .unwrap()
-        .trim();
+        .trim()
+        .to_string();
     assert!(text.contains("hello"));
 }
 
@@ -791,7 +796,7 @@ async fn test_on_step_finish_for_text_and_tool_call() {
         .with_tool(get_username())
         .on_step_finish(move |opts| {
             if let Some(Message::Assistant(assistant_msg)) = opts.messages().last() {
-                match &assistant_msg.content() {
+                match &assistant_msg.content {
                     LanguageModelResponseContentType::ToolCall(_) => {
                         println!("Tool called");
                         *tool_clone.lock().unwrap() = true;
@@ -800,6 +805,7 @@ async fn test_on_step_finish_for_text_and_tool_call() {
                         println!("Text returned");
                         *text_clone.lock().unwrap() = true;
                     }
+                    _ => {}
                 }
             }
         })

@@ -39,7 +39,7 @@ impl From<LanguageModelOptions> for CreateResponse {
         let mut items: Vec<InputItem> = options
             .messages
             .into_iter()
-            .map(|m| m.message.into())
+            .filter_map(|m| m.message.into())
             .collect();
 
         // system prompt first since openai likes it at the top
@@ -56,6 +56,8 @@ impl From<LanguageModelOptions> for CreateResponse {
 
         let tools: Option<Vec<ToolDefinition>> = options.tools.map(|t| {
             t.tools
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .iter()
                 .map(|t| ToolDefinition::from(t.clone()))
                 .collect()
@@ -80,7 +82,7 @@ impl From<LanguageModelOptions> for CreateResponse {
     }
 }
 
-impl From<Message> for InputItem {
+impl From<Message> for Option<InputItem> {
     fn from(m: Message) -> Self {
         let mut text_inp = InputMessage {
             role: Role::System,
@@ -93,38 +95,42 @@ impl From<Message> for InputItem {
                 let mut custom_msg = Value::Object(serde_json::Map::new());
                 custom_msg["type"] = Value::String("function_call_output".to_string());
                 custom_msg["call_id"] = Value::String(tool_info.tool.id.clone());
-                custom_msg["output"] = tool_info.output.clone();
-                InputItem::Custom(custom_msg)
+                custom_msg["output"] = tool_info
+                    .output
+                    .clone()
+                    .unwrap_or_else(|e| Value::String(e.to_string()));
+                Some(InputItem::Custom(custom_msg))
             }
-            Message::Assistant(ref assistant_msg) => match &assistant_msg.content {
-                LanguageModelResponseContentType::Text(msg) => {
+            Message::Assistant(ref assistant_msg) => match assistant_msg.content {
+                LanguageModelResponseContentType::Text(ref msg) => {
                     text_inp.role = Role::Assistant;
                     text_inp.content = InputContent::TextInput(msg.to_owned());
-                    InputItem::Message(text_inp)
+                    Some(InputItem::Message(text_inp))
                 }
-                LanguageModelResponseContentType::ToolCall(tool_info) => {
+                LanguageModelResponseContentType::ToolCall(ref tool_info) => {
                     let mut custom_msg = Value::Object(serde_json::Map::new());
                     custom_msg["arguments"] = Value::String(tool_info.input.to_string().clone());
                     custom_msg["call_id"] = Value::String(tool_info.tool.id.clone());
                     custom_msg["name"] = Value::String(tool_info.tool.name.clone());
                     custom_msg["type"] = Value::String("function_call".to_string());
-                    InputItem::Custom(custom_msg)
+                    Some(InputItem::Custom(custom_msg))
                 }
+                _ => None,
             },
             Message::User(u) => {
                 text_inp.role = Role::User;
                 text_inp.content = InputContent::TextInput(u.content);
-                InputItem::Message(text_inp)
+                Some(InputItem::Message(text_inp))
             }
             Message::System(s) => {
                 text_inp.role = Role::System;
                 text_inp.content = InputContent::TextInput(s.content);
-                InputItem::Message(text_inp)
+                Some(InputItem::Message(text_inp))
             }
             Message::Developer(d) => {
                 text_inp.role = Role::Developer;
                 text_inp.content = InputContent::TextInput(d);
-                InputItem::Message(text_inp)
+                Some(InputItem::Message(text_inp))
             }
         }
     }

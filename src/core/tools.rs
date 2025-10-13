@@ -1,11 +1,11 @@
 use crate::error::{Error, Result};
 use derive_builder::Builder;
-use futures::future::join_all;
 use schemars::Schema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt::Debug;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use tokio::task::JoinHandle;
 
 pub type ToolFn = Box<dyn Fn(Value) -> std::result::Result<String, String> + Send + Sync>;
 
@@ -83,38 +83,38 @@ impl Tool {
 
 #[derive(Debug, Clone, Default)]
 pub struct ToolList {
-    pub tools: Vec<Tool>,
+    pub tools: Arc<Mutex<Vec<Tool>>>,
 }
 
 impl ToolList {
     pub fn new(tools: Vec<Tool>) -> Self {
-        Self { tools }
+        Self {
+            tools: Arc::new(Mutex::new(tools)),
+        }
     }
 
     pub fn add_tool(&mut self, tool: Tool) {
-        self.tools.push(tool);
+        self.tools
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(tool);
     }
 
-    pub async fn execute(&self, tool_infos: Vec<ToolCallInfo>) -> Vec<Result<String>> {
+    pub async fn execute(&self, tool_info: ToolCallInfo) -> JoinHandle<Result<String>> {
         let tools = self.tools.clone();
-        let tasks = tool_infos.into_iter().map(|info| {
-            let tools = tools.clone();
-            tokio::spawn(async move {
-                let tool = tools.iter().find(|t| t.name == info.tool.name);
-                match tool {
-                    Some(tool) => tool.execute.call(info.input),
-                    None => Err(crate::error::Error::ToolCallError(
-                        "Tool not found".to_string(),
-                    )),
-                }
-            })
-        });
+        tokio::spawn(async move {
+            let tools = tools
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let tool = tools.iter().find(|tool| tool.name == tool_info.tool.name);
 
-        join_all(tasks)
-            .await
-            .into_iter()
-            .map(|res| res.unwrap())
-            .collect()
+            match tool {
+                Some(tool) => tool.execute.call(tool_info.input),
+                None => Err(crate::error::Error::ToolCallError(
+                    "Tool not found".to_string(),
+                )),
+            }
+        })
     }
 }
 
@@ -159,10 +159,19 @@ impl ToolCallInfo {
 }
 
 /// Contains information from a tool
-#[derive(Default, Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct ToolResultInfo {
     pub tool: ToolDetails,
-    pub output: serde_json::Value,
+    pub output: Result<serde_json::Value>,
+}
+
+impl Default for ToolResultInfo {
+    fn default() -> Self {
+        Self {
+            tool: ToolDetails::default(),
+            output: Ok(serde_json::Value::Null),
+        }
+    }
 }
 
 impl ToolResultInfo {
@@ -185,7 +194,7 @@ impl ToolResultInfo {
     }
 
     pub fn output(&mut self, inp: serde_json::Value) {
-        self.output = inp;
+        self.output = Ok(inp);
     }
 }
 

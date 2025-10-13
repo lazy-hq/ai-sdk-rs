@@ -2,10 +2,11 @@ use crate::core::{
     AssistantMessage, LanguageModelStreamChunkType, Message,
     language_model::{
         LanguageModel, LanguageModelOptions, LanguageModelResponseContentType,
-        LanguageModelResponseMethods, LanguageModelStream, request::LanguageModelRequest,
+        LanguageModelResponseMethods, LanguageModelStream, LanguageModelStreamChunk,
+        request::LanguageModelRequest,
     },
     messages::TaggedMessage,
-    utils::{handle_tool_call, resolve_message},
+    utils::resolve_message,
 };
 use crate::error::Result;
 use futures::StreamExt;
@@ -32,106 +33,107 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
             ..self.options
         };
 
-        options.current_step_id += 1;
-        if let Some(hook) = options.prepare_step.clone() {
-            hook(&mut options);
-        }
-
-        let mut response = self.model.stream_text(options.to_owned()).await?;
-
         let (tx, stream) = LanguageModelStream::new();
         let _ = tx.send(LanguageModelStreamChunkType::Start);
-        while let Some(chunk) = response.next().await {
-            match chunk {
-                Ok(LanguageModelStreamChunkType::End(assistant_msg)) => {
-                    let usage = assistant_msg.usage.clone();
-                    match &assistant_msg.content {
-                        LanguageModelResponseContentType::Text(text) => {
-                            let assistant_msg = Message::Assistant(AssistantMessage {
-                                content: text.clone().into(),
-                                usage: assistant_msg.usage.clone(),
-                            });
-                            options.messages.push(TaggedMessage {
-                                step_id: options.current_step_id,
-                                message: assistant_msg,
-                            });
 
-                            if let Some(ref hook) = options.on_step_finish {
-                                hook(&options);
-                            }
-                        }
-                        LanguageModelResponseContentType::ToolCall(tool_info) => {
-                            // add tool message
-                            let assistant_msg = Message::Assistant(AssistantMessage::new(
-                                LanguageModelResponseContentType::ToolCall(tool_info.clone()),
-                                usage.clone(),
-                            ));
-                            let _ = &options
-                                .messages
-                                .push(TaggedMessage::new(options.current_step_id, assistant_msg));
+        loop {
+            // Update the current step
+            options.current_step_id += 1;
 
-                            let mut current_tool_steps = Vec::new();
-                            handle_tool_call(
-                                &mut options,
-                                vec![tool_info.clone()],
-                                &mut current_tool_steps,
-                            )
-                            .await;
+            // Prepare the next step
+            if let Some(hook) = options.prepare_step.clone() {
+                hook(&mut options);
+            }
 
-                            if let Some(ref hook) = options.on_step_finish {
-                                hook(&options);
-                            }
+            let mut response = self.model.stream_text(options.clone()).await?;
+            let mut should_exit = false;
 
-                            if let Some(ref hook) = options.stop_when
-                                && hook(&options)
-                            {
-                                let _ = tx.send(LanguageModelStreamChunkType::Incomplete(
-                                    "Stopped by hook".to_string(),
-                                ));
-                                break;
-                            }
+            while let Some(ref chunk) = response.next().await {
+                match chunk {
+                    Ok(chunk) => {
+                        println!("Chunk: {:#?}", chunk);
+                        for output in chunk {
+                            match output {
+                                LanguageModelStreamChunk::Done(final_msg) => {
+                                    match final_msg.content {
+                                        LanguageModelResponseContentType::Text(_) => {
+                                            let assistant_msg =
+                                                Message::Assistant(AssistantMessage {
+                                                    content: final_msg.content.clone(),
+                                                    usage: final_msg.usage.clone(),
+                                                });
+                                            options.messages.push(TaggedMessage::new(
+                                                options.current_step_id,
+                                                assistant_msg,
+                                            ));
 
-                            // update anything options
-                            options.current_step_id += 1;
-                            self.options = options.clone();
-
-                            // call the next step
-                            let next_res = Box::pin(self.stream_text()).await;
-
-                            match next_res {
-                                Ok(StreamTextResponse { mut stream, .. }) => {
-                                    while let Some(chunk) = stream.next().await {
-                                        let _ = tx.send(chunk);
+                                            eprintln!("Final Message: {:#?}", final_msg);
+                                            should_exit = true;
+                                        }
+                                        LanguageModelResponseContentType::ToolCall(
+                                            ref tool_info,
+                                        ) => {
+                                            // add tool message
+                                            let usage = final_msg.usage.clone();
+                                            let _ = &options.messages.push(TaggedMessage::new(
+                                                options.current_step_id.to_owned(),
+                                                Message::Assistant(AssistantMessage::new(
+                                                    LanguageModelResponseContentType::ToolCall(
+                                                        tool_info.clone(),
+                                                    ),
+                                                    usage,
+                                                )),
+                                            ));
+                                            options.handle_tool_call(tool_info).await;
+                                        }
+                                        _ => {}
                                     }
-                                }
-                                Err(e) => {
-                                    // TODO: is this the right error to return. maybe Incomplete is
-                                    // correct
+
+                                    // Finish the step
+                                    if let Some(ref hook) = options.on_step_finish {
+                                        hook(&options);
+                                    }
+
+                                    // Stop If
+                                    if let Some(hook) = &options.stop_when.clone()
+                                        && hook(&options)
+                                    {
+                                        let _ = tx.send(LanguageModelStreamChunkType::Incomplete(
+                                            "Stopped by hook".to_string(),
+                                        ));
+                                        should_exit = true;
+                                        break;
+                                    }
+
                                     let _ = tx
-                                        .send(LanguageModelStreamChunkType::Failed(e.to_string()));
-                                    break;
+                                        .send(LanguageModelStreamChunkType::End(final_msg.clone()));
                                 }
-                            };
+                                LanguageModelStreamChunk::Delta(other) => {
+                                    let _ = tx.send(other.clone()); // propagate chunks
+                                }
+                            }
                         }
-                    };
+                    }
+                    Err(e) => {
+                        let _ = tx.send(LanguageModelStreamChunkType::Failed(e.to_string()));
+                        should_exit = true;
+                        break;
+                    }
                 }
-                Ok(other) => {
-                    let _ = tx.send(other); // propagate
-                }
-                Err(e) => {
-                    let _ = tx.send(LanguageModelStreamChunkType::Failed(e.to_string()));
+                if should_exit {
+                    eprintln!("Should exit");
                     break;
                 }
+            }
+            if should_exit {
+                eprintln!("Should exit 2");
+                break;
             }
         }
 
         drop(tx);
 
-        let result = StreamTextResponse {
-            stream,
-            model: Some(self.model.name()),
-            options,
-        };
+        let result = StreamTextResponse { stream, options };
 
         Ok(result)
     }
@@ -146,8 +148,6 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
 pub struct StreamTextResponse {
     /// A stream of responses from the language model.
     pub stream: LanguageModelStream,
-    /// The model that generated the response.
-    pub model: Option<String>,
     /// The reason the model stopped generating text.
     pub options: LanguageModelOptions,
 }

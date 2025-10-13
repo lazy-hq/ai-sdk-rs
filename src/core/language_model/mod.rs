@@ -89,9 +89,10 @@ pub trait StepMethods {
                 Message::Assistant(AssistantMessage {
                     content: LanguageModelResponseContentType::ToolCall(info),
                     ..
-                }) => Some(info.clone()),
+                }) => Some(Some(info.clone())),
                 _ => None,
             })
+            .flatten()
             .collect();
         if calls.is_empty() { None } else { Some(calls) }
     }
@@ -163,7 +164,7 @@ pub trait LanguageModelResponseMethods {
     fn content(&self) -> Option<&LanguageModelResponseContentType> {
         if let Some(msg) = self.options().messages.last() {
             match msg.message {
-                Message::Assistant(ref content) => Some(&content.content),
+                Message::Assistant(ref assistant_msg) => Some(&assistant_msg.content),
                 _ => None,
             }
         } else {
@@ -171,13 +172,13 @@ pub trait LanguageModelResponseMethods {
         }
     }
 
-    fn text(&self) -> Option<&String> {
+    fn text(&self) -> Option<String> {
         if let Some(msg) = self.options().messages.last() {
             match msg.message {
                 Message::Assistant(AssistantMessage {
-                    content: LanguageModelResponseContentType::Text(ref c),
+                    content: LanguageModelResponseContentType::Text(ref text),
                     ..
-                }) => Some(c),
+                }) => Some(text.clone()),
                 _ => None,
             }
         } else {
@@ -274,11 +275,8 @@ pub struct LanguageModelOptions {
     /// to repeatedly use the same words or phrases.
     pub frequency_penalty: Option<f32>,
 
-    /// Number tool call cycles to make
-    pub step_count: Option<usize>,
-
     /// List of tools to use.
-    pub tools: Option<ToolList>,
+    pub(crate) tools: Option<ToolList>,
 
     /// Used to track message steps
     pub(crate) current_step_id: usize,
@@ -308,7 +306,6 @@ impl Debug for LanguageModelOptions {
             .field("stop_sequences", &self.stop_sequences)
             .field("presence_penalty", &self.presence_penalty)
             .field("frequency_penalty", &self.frequency_penalty)
-            .field("step_count", &self.step_count)
             .field("tools", &self.tools)
             .field("current_step_id", &self.current_step_id)
             .field("stop_when", &self.stop_when.is_some())
@@ -326,6 +323,40 @@ impl LanguageModelOptions {
     pub fn messages(&self) -> Vec<Message> {
         self.messages.iter().map(|m| m.message.clone()).collect()
     }
+
+    /// Calls the requested tools, adds tool ouput message to messages,
+    /// and decrements the step count. uses the previous step id for tagging
+    /// the created messages.
+    pub(crate) async fn handle_tool_call(&mut self, input: &ToolCallInfo) -> &mut Self {
+        if let Some(tools) = &self.tools {
+            let tool_result_task = tools.execute(input.clone()).await;
+            let tool_result = tool_result_task
+                .await
+                .map_err(|err| Error::ToolCallError(format!("Error executing tool: {}", err)))
+                .and_then(|result| result);
+
+            let mut tool_output_infos = Vec::new();
+
+            let mut tool_output_info = ToolResultInfo::new(&input.tool.name);
+            let output = match tool_result {
+                Ok(result) => serde_json::Value::String(result),
+                Err(err) => serde_json::Value::String(format!("Error: {}", err)),
+            };
+            tool_output_info.output(output);
+            tool_output_info.id(&input.tool.id);
+            tool_output_infos.push(tool_output_info.clone());
+
+            // update messages
+            self.messages.push(TaggedMessage::new(
+                self.current_step_id,
+                Message::Tool(tool_output_info),
+            ));
+
+            self
+        } else {
+            self
+        }
+    }
 }
 
 // ============================================================================
@@ -336,6 +367,7 @@ impl LanguageModelOptions {
 pub enum LanguageModelResponseContentType {
     Text(String),
     ToolCall(ToolCallInfo),
+    NotSupported(String),
 }
 
 impl Default for LanguageModelResponseContentType {
@@ -383,8 +415,8 @@ impl Add for &Usage {
 /// Response from a language model.
 #[derive(Debug, Clone)]
 pub struct LanguageModelResponse {
-    /// The generated text.
-    pub content: LanguageModelResponseContentType,
+    /// The generated contents (supports multiple outputs).
+    pub contents: Vec<LanguageModelResponseContentType>,
 
     /// The model that generated the response.
     pub model: Option<String>,
@@ -402,7 +434,7 @@ impl LanguageModelResponse {
     /// Creates a new response with the generated text.
     pub fn new(text: impl Into<String>) -> Self {
         Self {
-            content: LanguageModelResponseContentType::new(text.into()),
+            contents: vec![LanguageModelResponseContentType::new(text.into())],
             model: None,
             stop_reason: None,
             usage: None,
@@ -429,9 +461,15 @@ pub enum LanguageModelStreamChunkType {
     NotSupported(String),
 }
 
+#[derive(Debug, Clone)]
+pub enum LanguageModelStreamChunk {
+    Delta(LanguageModelStreamChunkType),
+    Done(AssistantMessage),
+}
+
 /// A common interface for stream responses generated by providers (e.g. OpenAI)
 pub(crate) type ProviderStream =
-    Pin<Box<dyn Stream<Item = Result<LanguageModelStreamChunkType>> + Send>>;
+    Pin<Box<dyn Stream<Item = Result<Vec<LanguageModelStreamChunk>>> + Send>>;
 
 // A mapping of `ProviderStream` to a channel like stream.
 pub struct LanguageModelStream {
@@ -742,7 +780,7 @@ mod tests {
     #[test]
     fn test_step_tool_results_empty_messages() {
         let step = Step::new(0, vec![]);
-        assert_eq!(step.tool_results(), None);
+        assert!(step.tool_results().is_none());
     }
 
     #[test]
@@ -756,7 +794,7 @@ mod tests {
             }),
         ];
         let step = Step::new(0, messages);
-        assert_eq!(step.tool_results(), None);
+        assert!(step.tool_results().is_none());
     }
 
     #[test]
@@ -813,7 +851,7 @@ mod tests {
             }),
         ];
         let step = Step::new(0, messages);
-        assert_eq!(step.tool_results(), None);
+        assert!(step.tool_results().is_none());
     }
 
     #[test]
