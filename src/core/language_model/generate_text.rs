@@ -1,8 +1,8 @@
 use crate::core::{
-    AssistantMessage, LanguageModelResponseMethods, Message,
+    AssistantMessage, Message, ToolCallInfo, ToolResultInfo,
     language_model::{
         LanguageModel, LanguageModelOptions, LanguageModelResponse,
-        LanguageModelResponseContentType, request::LanguageModelRequest,
+        LanguageModelResponseContentType, Step, Usage, request::LanguageModelRequest,
     },
     messages::TaggedMessage,
     utils::resolve_message,
@@ -107,7 +107,7 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
 #[derive(Debug, Clone)]
 pub struct GenerateTextResponse {
     /// The options that generated this response
-    pub options: LanguageModelOptions, // TODO: implement getters
+    options: LanguageModelOptions, // TODO: implement getters
 }
 
 impl GenerateTextResponse {
@@ -123,11 +123,37 @@ impl GenerateTextResponse {
     pub fn step_ids(&self) -> Vec<usize> {
         self.options.messages.iter().map(|t| t.step_id).collect()
     }
-}
 
-impl LanguageModelResponseMethods for GenerateTextResponse {
-    fn options(&self) -> &LanguageModelOptions {
-        &self.options
+    pub fn step(&self, index: usize) -> Option<Step> {
+        self.options.step(index)
+    }
+
+    pub fn last_step(&self) -> Option<Step> {
+        self.options.last_step()
+    }
+
+    pub fn steps(&self) -> Vec<Step> {
+        self.options.steps()
+    }
+
+    pub fn usage(&self) -> Usage {
+        self.options.usage()
+    }
+
+    pub fn content(&self) -> Option<&LanguageModelResponseContentType> {
+        self.options.content()
+    }
+
+    pub fn text(&self) -> Option<String> {
+        self.options.text()
+    }
+
+    pub fn tool_results(&self) -> Option<Vec<ToolResultInfo>> {
+        self.options.tool_results()
+    }
+
+    pub fn tool_calls(&self) -> Option<Vec<ToolCallInfo>> {
+        self.options.tool_calls()
     }
 }
 

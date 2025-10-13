@@ -2,7 +2,7 @@
 
 use aisdk::{
     core::{
-        LanguageModelRequest, LanguageModelResponseMethods, LanguageModelStreamChunkType, Message,
+        LanguageModelRequest, LanguageModelStreamChunkType, Message,
         language_model::LanguageModelResponseContentType,
         tool,
         tools::{Tool, ToolExecute},

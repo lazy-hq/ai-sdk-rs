@@ -67,134 +67,6 @@ pub trait LanguageModel: Send + Sync + std::fmt::Debug {
     async fn stream_text(&mut self, options: LanguageModelOptions) -> Result<ProviderStream>;
 }
 
-/// Common methods for types that contain collections of Messages
-pub trait StepMethods {
-    fn messages(&self) -> &[Message];
-
-    fn usage(&self) -> Usage {
-        self.messages()
-            .iter()
-            .filter_map(|m| match m {
-                Message::Assistant(AssistantMessage { usage, .. }) => usage.as_ref(),
-                _ => None,
-            })
-            .fold(Usage::default(), |acc, u| &acc + u)
-    }
-
-    fn tool_calls(&self) -> Option<Vec<ToolCallInfo>> {
-        let calls: Vec<ToolCallInfo> = self
-            .messages()
-            .iter()
-            .filter_map(|msg| match msg {
-                Message::Assistant(AssistantMessage {
-                    content: LanguageModelResponseContentType::ToolCall(info),
-                    ..
-                }) => Some(Some(info.clone())),
-                _ => None,
-            })
-            .flatten()
-            .collect();
-        if calls.is_empty() { None } else { Some(calls) }
-    }
-
-    fn tool_results(&self) -> Option<Vec<ToolResultInfo>> {
-        let results: Vec<ToolResultInfo> = self
-            .messages()
-            .iter()
-            .filter_map(|msg| match msg {
-                Message::Tool(info) => Some(info.clone()),
-                _ => None,
-            })
-            .collect();
-        if results.is_empty() {
-            None
-        } else {
-            Some(results)
-        }
-    }
-}
-
-/// Common methods for response types that contain LanguageModelOptions
-pub trait LanguageModelResponseMethods {
-    fn options(&self) -> &LanguageModelOptions;
-
-    fn step(&self, index: usize) -> Option<Step> {
-        let messages: Vec<Message> = self
-            .options()
-            .messages
-            .iter()
-            .filter(|t| t.step_id == index)
-            .map(|t| t.message.clone())
-            .collect();
-        if messages.is_empty() {
-            None
-        } else {
-            Some(Step::new(index, messages))
-        }
-    }
-
-    fn last_step(&self) -> Option<Step> {
-        let max_step = self.options().messages.iter().map(|t| t.step_id).max()?;
-        self.step(max_step)
-    }
-
-    fn steps(&self) -> Vec<Step> {
-        let mut step_map: HashMap<usize, Vec<Message>> = HashMap::new();
-        for tagged in &self.options().messages {
-            step_map
-                .entry(tagged.step_id)
-                .or_default()
-                .push(tagged.message.clone());
-        }
-        let mut steps: Vec<Step> = step_map
-            .into_iter()
-            .map(|(id, msgs)| Step::new(id, msgs))
-            .collect();
-        steps.sort_by_key(|s| s.step_id);
-        steps
-    }
-
-    fn usage(&self) -> Usage {
-        self.steps()
-            .iter()
-            .map(|s| s.usage())
-            .fold(Usage::default(), |acc, u| &acc + &u)
-    }
-
-    fn content(&self) -> Option<&LanguageModelResponseContentType> {
-        if let Some(msg) = self.options().messages.last() {
-            match msg.message {
-                Message::Assistant(ref assistant_msg) => Some(&assistant_msg.content),
-                _ => None,
-            }
-        } else {
-            None
-        }
-    }
-
-    fn text(&self) -> Option<String> {
-        if let Some(msg) = self.options().messages.last() {
-            match msg.message {
-                Message::Assistant(AssistantMessage {
-                    content: LanguageModelResponseContentType::Text(ref text),
-                    ..
-                }) => Some(text.clone()),
-                _ => None,
-            }
-        } else {
-            None
-        }
-    }
-
-    fn tool_results(&self) -> Option<Vec<ToolResultInfo>> {
-        self.options().messages.as_slice().extract_tool_results()
-    }
-
-    fn tool_calls(&self) -> Option<Vec<ToolCallInfo>> {
-        self.options().messages.as_slice().extract_tool_calls()
-    }
-}
-
 // ============================================================================
 // Section: hook types
 // ============================================================================
@@ -218,11 +90,51 @@ impl Step {
     pub fn new(step_id: usize, messages: Vec<Message>) -> Self {
         Self { step_id, messages }
     }
-}
 
-impl StepMethods for Step {
-    fn messages(&self) -> &[Message] {
+    pub fn messages(&self) -> &[Message] {
         &self.messages
+    }
+
+    pub fn usage(&self) -> Usage {
+        self.messages()
+            .iter()
+            .filter_map(|m| match m {
+                Message::Assistant(AssistantMessage { usage, .. }) => usage.as_ref(),
+                _ => None,
+            })
+            .fold(Usage::default(), |acc, u| &acc + u)
+    }
+
+    pub fn tool_calls(&self) -> Option<Vec<ToolCallInfo>> {
+        let calls: Vec<ToolCallInfo> = self
+            .messages()
+            .iter()
+            .filter_map(|msg| match msg {
+                Message::Assistant(AssistantMessage {
+                    content: LanguageModelResponseContentType::ToolCall(info),
+                    ..
+                }) => Some(Some(info.clone())),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        if calls.is_empty() { None } else { Some(calls) }
+    }
+
+    pub fn tool_results(&self) -> Option<Vec<ToolResultInfo>> {
+        let results: Vec<ToolResultInfo> = self
+            .messages()
+            .iter()
+            .filter_map(|msg| match msg {
+                Message::Tool(info) => Some(info.clone()),
+                _ => None,
+            })
+            .collect();
+        if results.is_empty() {
+            None
+        } else {
+            Some(results)
+        }
     }
 }
 
@@ -356,6 +268,81 @@ impl LanguageModelOptions {
         } else {
             self
         }
+    }
+
+    pub fn step(&self, index: usize) -> Option<Step> {
+        let messages: Vec<Message> = self
+            .messages
+            .iter()
+            .filter(|t| t.step_id == index)
+            .map(|t| t.message.clone())
+            .collect();
+        if messages.is_empty() {
+            None
+        } else {
+            Some(Step::new(index, messages))
+        }
+    }
+
+    pub fn last_step(&self) -> Option<Step> {
+        let max_step = self.messages.iter().map(|t| t.step_id).max()?;
+        self.step(max_step)
+    }
+
+    pub fn steps(&self) -> Vec<Step> {
+        let mut step_map: HashMap<usize, Vec<Message>> = HashMap::new();
+        for tagged in &self.messages {
+            step_map
+                .entry(tagged.step_id)
+                .or_default()
+                .push(tagged.message.clone());
+        }
+        let mut steps: Vec<Step> = step_map
+            .into_iter()
+            .map(|(id, msgs)| Step::new(id, msgs))
+            .collect();
+        steps.sort_by_key(|s| s.step_id);
+        steps
+    }
+
+    pub fn usage(&self) -> Usage {
+        self.steps()
+            .iter()
+            .map(|s| s.usage())
+            .fold(Usage::default(), |acc, u| &acc + &u)
+    }
+
+    pub fn content(&self) -> Option<&LanguageModelResponseContentType> {
+        if let Some(msg) = self.messages.last() {
+            match msg.message {
+                Message::Assistant(ref assistant_msg) => Some(&assistant_msg.content),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn text(&self) -> Option<String> {
+        if let Some(msg) = self.messages.last() {
+            match msg.message {
+                Message::Assistant(AssistantMessage {
+                    content: LanguageModelResponseContentType::Text(ref text),
+                    ..
+                }) => Some(text.clone()),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn tool_results(&self) -> Option<Vec<ToolResultInfo>> {
+        self.messages.as_slice().extract_tool_results()
+    }
+
+    pub fn tool_calls(&self) -> Option<Vec<ToolCallInfo>> {
+        self.messages.as_slice().extract_tool_calls()
     }
 }
 

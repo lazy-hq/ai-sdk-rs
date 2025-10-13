@@ -119,8 +119,6 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
     });
 
     let expanded = quote! {
-        // TODO OR NOT TODO: If there is a way to remove the usage of Tool and ToolExecute here it would be
-        // nice. currently the user has to import these types.
         #[allow(unused_variables)]
         #vis fn #fn_name() -> Tool {
             use schemars::{schema_for, JsonSchema, Schema};
@@ -142,8 +140,6 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
             tool.description = #description.to_string();
             tool.input_schema = input_schema;
             tool.execute = ToolExecute::new(Box::new(|inp| -> std::result::Result<String, String> {
-                // TODO: Do `input_schema` validation on inp
-                // Extract all parameters from the HashMap here
                 #(#binding_tokens)*
                 #block
             }));
