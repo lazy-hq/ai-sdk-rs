@@ -120,12 +120,11 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
 // Section: response types
 // ============================================================================
 
-//TODO: add standard response fields
 /// Response from a generate call on `GenerateText`.
 #[derive(Debug, Clone)]
 pub struct GenerateTextResponse {
     /// The options that generated this response
-    options: LanguageModelOptions, // TODO: implement getters
+    options: LanguageModelOptions,
 }
 
 impl GenerateTextResponse {

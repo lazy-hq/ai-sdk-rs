@@ -653,14 +653,7 @@ async fn test_stop_when_halts_during_tool_call() {
     let step_ids = result.step_ids();
     // Should stop after tool call, no final text step
     assert!(step_ids.len() < 5); // Less than full flow
-    // TODO: add stop reason testing
-    // assert!(
-    //     result
-    //         .stop_reason
-    //         .as_ref()
-    //         .unwrap()
-    //         .contains("Stopped by hook")
-    // );
+    assert!(matches!(result.stop_reason().unwrap(), StopReason::Hook));
 }
 
 #[tokio::test]

@@ -85,7 +85,6 @@ pub struct Step {
     pub messages: Vec<Message>,
 }
 
-// TODO: explore options to use traits
 impl Step {
     pub fn new(step_id: usize, messages: Vec<Message>) -> Self {
         Self { step_id, messages }
@@ -405,7 +404,6 @@ impl Add for &Usage {
     }
 }
 
-// TODO: constract a standard response type
 /// Response from a language model.
 #[derive(Debug, Clone)]
 pub struct LanguageModelResponse {
@@ -437,10 +435,11 @@ pub enum LanguageModelStreamChunkType {
     ToolCall(String),
     /// The model has stopped generating text successfully.
     End(AssistantMessage),
-    /// The model has failed to generate text.
-    Failed(String), // TODO: add a type to accomodate provider and aisdk errors
+    /// The model has failed to generate text. error specified by
+    /// the language model
+    Failed(String),
     /// The model finsished generating text with incomplete response.
-    Incomplete(String), // TODO: replace with StopReason
+    Incomplete(String),
     /// Return this for unimplemented features for a specific model.
     NotSupported(String),
 }
@@ -480,7 +479,6 @@ impl Stream for LanguageModelStream {
     }
 }
 
-// TODO: support Length, ContentFilter, ToolCalls, Error
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum StopReason {
     #[default]

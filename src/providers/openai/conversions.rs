@@ -77,7 +77,7 @@ impl From<LanguageModelOptions> for CreateResponse {
             stream: Some(false),
             top_p: options.top_p.map(|t| t as f32 / 100.0),
             tools,
-            ..Default::default() // TODO: add support for other options
+            ..Default::default()
         }
     }
 }

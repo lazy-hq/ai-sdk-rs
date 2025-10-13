@@ -141,7 +141,7 @@ impl LanguageModel for OpenAI {
 
                         for out in d.response.output.unwrap_or_default() {
                             match out {
-                                // TODO: handle in `ResponseEvent::ResponseFunctionCallArgumentsDone`
+                                // TODO: handle in `ResponseEvent::ResponseFunctionCallArgumentsDone` instead
                                 OutputItem::FunctionCall(f) => {
                                     let mut tool_info = ToolCallInfo::new(f.name);
                                     tool_info.id(f.call_id);
