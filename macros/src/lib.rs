@@ -7,6 +7,44 @@ use syn::{
 };
 
 #[proc_macro_attribute]
+/// Constructs a tool from a function defnition. A tool has a name, a description,
+/// an input and a body. all three components are infered from a standard rust
+/// function. The name is the defined name of the function,
+/// The description is infered from the doc comments of the function, The input
+/// infered from the function arguments.
+///
+/// # Example
+///
+/// ```rust
+/// #[tool]
+/// /// Returns the username
+/// fn get_username(id: String) {
+///     // Your code here
+/// }
+/// ```
+///
+/// - `get_username` becomes the name of the tool
+/// - `Returns the username` becomes the description of the tool
+/// - `id: String` becomes the input of the tool. converted to `{"id": "string"}`
+/// as json schema
+///
+/// In the event that the model refuses to send an argument, the default implementation
+/// will be used. this works perfectly for arguments that are `Option`s. Make sure to
+/// use `Option` types for arguments that are optional or implement a default for those
+/// that are not and handle those defaults accordingly in the tool body.
+///
+/// You can override name and description using the macro arguments `name` and `desc`.
+///
+/// # Example with overrides
+/// ```rust
+///     #[tool(
+///         name = "the-name-for-this-tool",
+///         desc = "the-description-for-this-tool"
+///     )]
+///     fn get_username(id: String) {
+///         // Your code here
+///     }
+/// ```
 pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let input_fn = parse_macro_input!(item as ItemFn);
     let fn_name = &input_fn.sig.ident;
@@ -89,10 +127,12 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     let ident_str = ident.to_string();
                     Some(quote! {
                         let #ident: #ty = serde_json::from_value(
-                            inp.as_object().unwrap().get(#ident_str).unwrap().clone()
-                        ).unwrap_or_else(|e| {
-                            todo!("Failed to deserialize {}: {}", #ident_str, e)
-                        });
+                            inp.as_object()
+                                .unwrap()
+                                .get(#ident_str)
+                                .unwrap()
+                                .clone()
+                        ).unwrap_or_default();  // use default value if model doesn't send arg
                     })
                 } else {
                     None

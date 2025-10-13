@@ -699,7 +699,7 @@ async fn test_stop_when_false_allows_continuation() {
 
     #[tool]
     fn get_neighbourhood() -> Result<String> {
-        Ok("done".to_string())
+        Ok("anckocha".to_string())
     }
 
     let result = LanguageModelRequest::builder()
