@@ -1,0 +1,67 @@
+# Base options configuration - defines all possible option types and their schemas
+# This reduces repetition across model configurations
+
+[options.temperature]
+type = "f32"
+description = "Controls randomness in the output. Higher values increase randomness."
+min = 0.0
+max = 2.0
+default = 1.0
+
+[options.max_output_tokens]
+type = "u32"
+description = "Maximum number of tokens to generate in the response."
+min = 1
+max = 4096
+default = 1024
+
+[options.top_p]
+type = "f32"
+description = "Nucleus sampling parameter. Controls diversity of output."
+min = 0.0
+max = 1.0
+default = 1.0
+
+[options.top_k]
+type = "u32"
+description = "Top-k sampling parameter. Limits vocabulary to top k tokens."
+min = 1
+max = 100
+default = 50
+
+[options.frequency_penalty]
+type = "f32"
+description = "Penalizes frequent tokens to reduce repetition."
+min = -2.0
+max = 2.0
+default = 0.0
+
+[options.presence_penalty]
+type = "f32"
+description = "Penalizes tokens that have appeared so far to encourage novelty."
+min = -2.0
+max = 2.0
+default = 0.0
+
+[options.max_retries]
+type = "u32"
+description = "Maximum number of retries for failed requests."
+min = 0
+max = 10
+default = 3
+
+[options.stop_sequences]
+type = "vec_string"
+description = "Sequences where the model should stop generating text."
+
+[options.seed]
+type = "u32"
+description = "Random seed for deterministic outputs."
+min = 0
+max = 4294967295
+
+[options.reasoning_effort]
+type = "enum"
+description = "Level of reasoning effort for models that support it."
+values = ["low", "medium", "high"]
+default = "medium"

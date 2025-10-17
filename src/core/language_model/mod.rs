@@ -9,16 +9,12 @@ pub mod generate_text;
 pub mod request;
 pub mod stream_text;
 
-use crate::core::messages::{AssistantMessage, TaggedMessage, TaggedMessageHelpers};
-use crate::core::tools::ToolList;
-use crate::core::utils;
+use crate::core::messages::AssistantMessage;
+use crate::core::{LanguageModelRequest, utils};
 use crate::core::{Message, ToolCallInfo, ToolResultInfo};
 use crate::error::{Error, Result};
 use async_trait::async_trait;
-use derive_builder::Builder;
 use futures::Stream;
-use schemars::Schema;
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::Add;
 use std::pin::Pin;
@@ -43,7 +39,13 @@ pub const DEFAULT_TOOL_STEP_COUNT: usize = 3;
 /// be extensible to support various functionalities, such as single-shot
 /// generation and streaming responses.
 #[async_trait]
-pub trait LanguageModel: Send + Sync + std::fmt::Debug {
+pub trait LanguageModel: Send + Sync + std::fmt::Debug + Clone {
+    type Options: Debug + Default + Clone + Send + Sync;
+
+    fn options(&self) -> &Self::Options;
+
+    fn options_mut(&mut self) -> &mut Self::Options;
+
     fn name(&self) -> String;
     /// Performs a single, non-streaming text generation request.
     ///
@@ -54,7 +56,7 @@ pub trait LanguageModel: Send + Sync + std::fmt::Debug {
     /// Returns an `Error` if the API call fails or the request is invalid.
     async fn generate_text(
         &mut self,
-        options: LanguageModelOptions,
+        request: LanguageModelRequest<Self>,
     ) -> Result<LanguageModelResponse>;
 
     /// Performs a streaming text generation request.
@@ -64,16 +66,20 @@ pub trait LanguageModel: Send + Sync + std::fmt::Debug {
     /// # Errors
     ///
     /// Returns an `Error` if the API call fails or the request is invalid.
-    async fn stream_text(&mut self, options: LanguageModelOptions) -> Result<ProviderStream>;
+    async fn stream_text(&mut self, request: LanguageModelRequest<Self>) -> Result<ProviderStream>;
 }
 
 // ============================================================================
 // Section: hook types
 // ============================================================================
 
-pub type StopWhenHook = Arc<dyn Fn(&LanguageModelOptions) -> bool + Send + Sync>;
-pub type PrepareStepHook = Arc<dyn Fn(&mut LanguageModelOptions) + Send + Sync>;
-pub type OnStepFinishHook = Arc<dyn Fn(&LanguageModelOptions) + Send + Sync>;
+// TODO: make immutable changes to hook inputs
+// change inputs to request types
+pub type StopWhenHook<M> = Arc<dyn Fn(&LanguageModelRequest<M>) -> bool + Send + Sync>;
+pub type PrepareStepHook<M> =
+    Arc<dyn Fn(LanguageModelRequest<M>) -> Option<LanguageModelRequest<M>> + Send + Sync>;
+pub type OnStepFinishHook<M> =
+    Arc<dyn Fn(LanguageModelRequest<M>) -> Option<LanguageModelRequest<M>> + Send + Sync>;
 
 // ============================================================================
 // Section: structs and impls
@@ -138,230 +144,6 @@ impl Step {
 }
 
 // ============================================================================
-// Section: options
-// ============================================================================
-
-/// Options for a language model request.
-#[derive(Clone, Default, Builder)]
-#[builder(pattern = "owned", setter(into), build_fn(error = "Error"))]
-pub struct LanguageModelOptions {
-    /// System prompt to be used for the request.
-    pub system: Option<String>,
-
-    /// Output format schema.
-    pub schema: Option<Schema>,
-
-    /// The seed (integer) to use for random sampling. If set and supported
-    /// by the model, calls will generate deterministic results.
-    pub seed: Option<u32>,
-
-    /// Randomness.
-    pub temperature: Option<u32>,
-
-    /// Nucleus sampling.
-    pub top_p: Option<u32>,
-
-    /// Top-k sampling.
-    pub top_k: Option<u32>,
-
-    /// Maximum number of retries.
-    pub max_retries: Option<u32>,
-
-    /// Maxoutput tokens.
-    pub max_output_tokens: Option<u32>,
-
-    /// Stop sequences.
-    /// If set, the model will stop generating text when one of the stop sequences is generated.
-    pub stop_sequences: Option<Vec<String>>,
-
-    /// Presence penalty setting. It affects the likelihood of the model to
-    /// repeat information that is already in the prompt.
-    pub presence_penalty: Option<f32>,
-
-    /// Frequency penalty setting. It affects the likelihood of the model
-    /// to repeatedly use the same words or phrases.
-    pub frequency_penalty: Option<f32>,
-
-    /// Hook to stop tool calling if returns true
-    pub stop_when: Option<StopWhenHook>,
-
-    /// Hook called before each step (language model request)
-    pub prepare_step: Option<PrepareStepHook>,
-
-    /// Hook called after each step finishes
-    pub on_step_finish: Option<OnStepFinishHook>,
-
-    /// Reasoning effort
-    pub reasoning_effort: Option<ReasoningEffort>,
-
-    /// List of tools to use.
-    pub(crate) tools: Option<ToolList>,
-
-    /// Used to track message steps
-    pub(crate) current_step_id: usize,
-
-    /// The messages to generate text from.
-    /// At least User Message is required.
-    pub(crate) messages: Vec<TaggedMessage>,
-
-    // The stop reasons. should be updated after each step.
-    pub(crate) stop_reason: Option<StopReason>,
-}
-
-impl Debug for LanguageModelOptions {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LanguageModelOptions")
-            .field("system", &self.system)
-            .field("messages", &self.messages)
-            .field("schema", &self.schema)
-            .field("seed", &self.seed)
-            .field("temperature", &self.temperature)
-            .field("top_p", &self.top_p)
-            .field("top_k", &self.top_k)
-            .field("max_retries", &self.max_retries)
-            .field("max_output_tokens", &self.max_output_tokens)
-            .field("stop_sequences", &self.stop_sequences)
-            .field("presence_penalty", &self.presence_penalty)
-            .field("frequency_penalty", &self.frequency_penalty)
-            .field("tools", &self.tools)
-            .field("current_step_id", &self.current_step_id)
-            .field("stop_when", &self.stop_when.is_some())
-            .field("prepare_step", &self.prepare_step.is_some())
-            .field("on_step_finish", &self.on_step_finish.is_some())
-            .finish()
-    }
-}
-
-impl LanguageModelOptions {
-    pub fn builder() -> LanguageModelOptionsBuilder {
-        LanguageModelOptionsBuilder::default()
-    }
-
-    pub fn messages(&self) -> Vec<Message> {
-        self.messages.iter().map(|m| m.message.clone()).collect()
-    }
-
-    /// Calls the requested tools, adds tool ouput message to messages,
-    /// and decrements the step count. uses the previous step id for tagging
-    /// the created messages.
-    pub(crate) async fn handle_tool_call(&mut self, input: &ToolCallInfo) -> &mut Self {
-        if let Some(tools) = &self.tools {
-            let tool_result_task = tools.execute(input.clone()).await;
-            let tool_result = tool_result_task
-                .await
-                .map_err(|err| Error::ToolCallError(format!("Error executing tool: {}", err)))
-                .and_then(|result| result);
-
-            let mut tool_output_infos = Vec::new();
-
-            let mut tool_output_info = ToolResultInfo::new(&input.tool.name);
-            let output = match tool_result {
-                Ok(result) => serde_json::Value::String(result),
-                Err(err) => serde_json::Value::String(format!("Error: {}", err)),
-            };
-            tool_output_info.output(output);
-            tool_output_info.id(&input.tool.id);
-            tool_output_infos.push(tool_output_info.clone());
-
-            // update messages
-            self.messages.push(TaggedMessage::new(
-                self.current_step_id,
-                Message::Tool(tool_output_info),
-            ));
-
-            self
-        } else {
-            self
-        }
-    }
-
-    pub fn step(&self, index: usize) -> Option<Step> {
-        let messages: Vec<Message> = self
-            .messages
-            .iter()
-            .filter(|t| t.step_id == index)
-            .map(|t| t.message.clone())
-            .collect();
-        if messages.is_empty() {
-            None
-        } else {
-            Some(Step::new(index, messages))
-        }
-    }
-
-    pub fn last_step(&self) -> Option<Step> {
-        let max_step = self.messages.iter().map(|t| t.step_id).max()?;
-        self.step(max_step)
-    }
-
-    pub fn steps(&self) -> Vec<Step> {
-        let mut step_map: HashMap<usize, Vec<Message>> = HashMap::new();
-        for tagged in &self.messages {
-            step_map
-                .entry(tagged.step_id)
-                .or_default()
-                .push(tagged.message.clone());
-        }
-        let mut steps: Vec<Step> = step_map
-            .into_iter()
-            .map(|(id, msgs)| Step::new(id, msgs))
-            .collect();
-        steps.sort_by_key(|s| s.step_id);
-        steps
-    }
-
-    pub fn usage(&self) -> Usage {
-        self.steps()
-            .iter()
-            .map(|s| s.usage())
-            .fold(Usage::default(), |acc, u| &acc + &u)
-    }
-
-    pub fn content(&self) -> Option<&LanguageModelResponseContentType> {
-        if let Some(msg) = self.messages.last() {
-            match msg.message {
-                Message::Assistant(ref assistant_msg) => {
-                    if let LanguageModelResponseContentType::Reasoning(_) = assistant_msg.content {
-                        None
-                    } else {
-                        Some(&assistant_msg.content)
-                    }
-                }
-                _ => None,
-            }
-        } else {
-            None
-        }
-    }
-
-    pub fn text(&self) -> Option<String> {
-        if let Some(msg) = self.messages.last() {
-            match msg.message {
-                Message::Assistant(AssistantMessage {
-                    content: LanguageModelResponseContentType::Text(ref text),
-                    ..
-                }) => Some(text.clone()),
-                _ => None,
-            }
-        } else {
-            None
-        }
-    }
-
-    pub fn tool_results(&self) -> Option<Vec<ToolResultInfo>> {
-        self.messages.as_slice().extract_tool_results()
-    }
-
-    pub fn tool_calls(&self) -> Option<Vec<ToolCallInfo>> {
-        self.messages.as_slice().extract_tool_calls()
-    }
-
-    pub fn stop_reason(&self) -> Option<StopReason> {
-        self.stop_reason.clone()
-    }
-}
-
-// ============================================================================
 // Section: response types
 // ============================================================================
 
@@ -415,7 +197,7 @@ impl Add for &Usage {
 }
 
 /// Response from a language model.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct LanguageModelResponse {
     /// The generated contents (supports multiple outputs).
     pub contents: Vec<LanguageModelResponseContentType>,

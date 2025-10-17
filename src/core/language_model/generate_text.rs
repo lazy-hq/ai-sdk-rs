@@ -4,8 +4,8 @@ use crate::{
     core::{
         AssistantMessage, Message,
         language_model::{
-            LanguageModel, LanguageModelOptions, LanguageModelResponse,
-            LanguageModelResponseContentType, StopReason, request::LanguageModelRequest,
+            LanguageModel, LanguageModelResponse, LanguageModelResponseContentType, StopReason,
+            request::LanguageModelRequest,
         },
         messages::TaggedMessage,
         utils::resolve_message,
@@ -22,38 +22,30 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
     /// This function does not stream the output. If you want to stream the output, use `StreamText` instead.
     ///
     /// Returns an `Error` if the underlying model fails to generate a response.
-    pub async fn generate_text(&mut self) -> Result<GenerateTextResponse> {
-        let (system_prompt, messages) = resolve_message(&self.options, &self.prompt);
+    pub async fn generate_text(&mut self) -> Result<GenerateTextResponse<M>> {
+        let (system_prompt, messages) = resolve_message(self);
+        self.system = Some(system_prompt);
+        self.messages = messages;
 
-        let mut options = LanguageModelOptions {
-            system: Some(system_prompt),
-            messages,
-            schema: self.options.schema.to_owned(),
-            stop_sequences: self.options.stop_sequences.to_owned(),
-            tools: self.options.tools.to_owned(),
-            stop_when: self.options.stop_when.clone(),
-            prepare_step: self.options.prepare_step.clone(),
-            on_step_finish: self.options.on_step_finish.clone(),
-            stop_reason: None,
-            ..self.options
-        };
+        // let mut options = M::Options::default();
 
         loop {
             // Update the current step
-            options.current_step_id += 1;
+            self.current_step_id += 1;
 
             // Prepare the next step
-            if let Some(hook) = options.prepare_step.clone() {
-                hook(&mut options);
+            if let Some(hook) = self.prepare_step.clone() {
+                *self = hook(self.clone()).unwrap_or(self.clone());
             }
 
             let response: LanguageModelResponse = self
                 .model
-                .generate_text(options.clone())
+                .generate_text(self.clone()) // TODO: explore paths where providers don't mutate
+                // state
                 .await
                 .inspect_err(|e| {
-                options.stop_reason = Some(StopReason::Error(e.clone()));
-            })?;
+                    self.stop_reason = Some(StopReason::Error(e.clone()));
+                })?;
 
             for output in response.contents.iter() {
                 match output {
@@ -62,65 +54,65 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
                             content: text.clone().into(),
                             usage: response.usage.clone(),
                         });
-                        options
-                            .messages
-                            .push(TaggedMessage::new(options.current_step_id, assistant_msg));
+                        self.messages
+                            .push(TaggedMessage::new(self.current_step_id, assistant_msg));
                     }
                     LanguageModelResponseContentType::Reasoning(reason) => {
                         let assistant_msg = Message::Assistant(AssistantMessage {
                             content: reason.clone().into(),
                             usage: response.usage.clone(),
                         });
-                        options
-                            .messages
-                            .push(TaggedMessage::new(options.current_step_id, assistant_msg));
+                        self.messages
+                            .push(TaggedMessage::new(self.current_step_id, assistant_msg));
                     }
                     LanguageModelResponseContentType::ToolCall(tool_info) => {
                         // add tool message
                         let usage = response.usage.clone();
-                        let _ = &options.messages.push(TaggedMessage::new(
-                            options.current_step_id.to_owned(),
+                        let _ = &self.messages.push(TaggedMessage::new(
+                            self.current_step_id.to_owned(),
                             Message::Assistant(AssistantMessage::new(
                                 LanguageModelResponseContentType::ToolCall(tool_info.clone()),
                                 usage,
                             )),
                         ));
-                        options.handle_tool_call(tool_info).await;
+                        self.handle_tool_call(tool_info).await;
                     }
                     _ => (),
                 }
             }
 
             // Finish the step
-            if let Some(ref hook) = options.on_step_finish {
-                hook(&options);
+            if let Some(ref hook) = self.on_step_finish {
+                *self = hook(self.clone()).unwrap_or(self.clone());
             };
 
             if response.contents.is_empty() {
-                options.stop_reason = Some(StopReason::Error(Error::Other(
+                self.stop_reason = Some(StopReason::Error(Error::Other(
                     "Language model returned empty response".to_string(),
                 )));
                 break;
             }
 
             // Stop If
-            if let Some(hook) = &options.stop_when.clone()
-                && hook(&options)
+            if let Some(hook) = &self.stop_when.clone()
+                && hook(self)
             {
-                options.stop_reason = Some(StopReason::Hook);
+                self.stop_reason = Some(StopReason::Hook);
                 break;
             }
 
             match response.contents.last() {
                 Some(LanguageModelResponseContentType::ToolCall(_)) => (),
                 _ => {
-                    options.stop_reason = Some(StopReason::Finish);
+                    self.stop_reason = Some(StopReason::Finish);
                     break;
                 }
             };
         }
 
-        Ok(GenerateTextResponse { options })
+        Ok(GenerateTextResponse::<M> {
+            request: self.clone(),
+        })
     }
 }
 
@@ -130,14 +122,16 @@ impl<M: LanguageModel> LanguageModelRequest<M> {
 
 /// Response from a generate call on `GenerateText`.
 #[derive(Debug, Clone)]
-pub struct GenerateTextResponse {
+pub struct GenerateTextResponse<M: LanguageModel> {
     /// The options that generated this response
-    options: LanguageModelOptions,
+    request: LanguageModelRequest<M>,
 }
 
-impl GenerateTextResponse {
+impl<M: LanguageModel> GenerateTextResponse<M> {
+    // TODO: explore paths where into_schema is given to the provider because there are some who
+    // don't implement it
     pub fn into_schema<T: DeserializeOwned>(&self) -> std::result::Result<T, serde_json::Error> {
-        if let Some(text) = &self.text() {
+        if let Some(text) = &self.request.text() {
             serde_json::from_str(text)
         } else {
             Err(serde_json::Error::custom("No text response found"))
@@ -146,15 +140,15 @@ impl GenerateTextResponse {
 
     #[cfg(any(test, feature = "test-access"))]
     pub fn step_ids(&self) -> Vec<usize> {
-        self.options.messages.iter().map(|t| t.step_id).collect()
+        self.request.messages.iter().map(|t| t.step_id).collect()
     }
 }
 
-impl Deref for GenerateTextResponse {
-    type Target = LanguageModelOptions;
+impl<M: LanguageModel> Deref for GenerateTextResponse<M> {
+    type Target = LanguageModelRequest<M>;
 
     fn deref(&self) -> &Self::Target {
-        &self.options
+        &self.request
     }
 }
 
@@ -163,13 +157,47 @@ mod tests {
     use super::*;
     use crate::core::{
         AssistantMessage, ToolCallInfo, ToolResultInfo,
-        language_model::{LanguageModelResponseContentType, Usage},
+        language_model::{LanguageModelResponseContentType, ProviderStream, Usage},
         messages::TaggedMessage,
     };
 
+    #[derive(Debug, Clone, Default)]
+    struct MockLanguageModel;
+
+    #[async_trait::async_trait]
+    impl LanguageModel for MockLanguageModel {
+        type Options = ();
+
+        fn options(&self) -> &Self::Options {
+            unimplemented!()
+        }
+
+        fn options_mut(&mut self) -> &mut Self::Options {
+            unimplemented!()
+        }
+
+        fn name(&self) -> String {
+            unimplemented!()
+        }
+
+        async fn generate_text(
+            &mut self,
+            _request: LanguageModelRequest<Self>,
+        ) -> Result<LanguageModelResponse> {
+            unimplemented!()
+        }
+
+        async fn stream_text(
+            &mut self,
+            _request: LanguageModelRequest<Self>,
+        ) -> Result<ProviderStream> {
+            unimplemented!()
+        }
+    }
+
     #[test]
     fn test_generate_text_response_step() {
-        let options = LanguageModelOptions {
+        let request = LanguageModelRequest {
             messages: vec![
                 TaggedMessage::new(0, Message::System("System".to_string().into())),
                 TaggedMessage::new(0, Message::User("User".to_string().into())),
@@ -183,7 +211,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let response = GenerateTextResponse { options };
+        let response = GenerateTextResponse::<MockLanguageModel> { request };
 
         let step0 = response.step(0).unwrap();
         assert_eq!(step0.step_id, 0);
@@ -198,7 +226,7 @@ mod tests {
 
     #[test]
     fn test_generate_text_response_final_step() {
-        let options = LanguageModelOptions {
+        let request = LanguageModelRequest::<MockLanguageModel> {
             messages: vec![
                 TaggedMessage::new(0, Message::System("System".to_string().into())),
                 TaggedMessage::new(1, Message::User("User".to_string().into())),
@@ -212,7 +240,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let response = GenerateTextResponse { options };
+        let response = GenerateTextResponse::<MockLanguageModel> { request };
 
         let final_step = response.last_step().unwrap();
         assert_eq!(final_step.step_id, 2);
@@ -221,7 +249,7 @@ mod tests {
 
     #[test]
     fn test_generate_text_response_steps() {
-        let options = LanguageModelOptions {
+        let request = LanguageModelRequest::<MockLanguageModel> {
             messages: vec![
                 TaggedMessage::new(0, Message::System("System".to_string().into())),
                 TaggedMessage::new(0, Message::User("User".to_string().into())),
@@ -242,7 +270,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let response = GenerateTextResponse { options };
+        let response = GenerateTextResponse::<MockLanguageModel> { request };
 
         let steps = response.steps();
         assert_eq!(steps.len(), 3);
@@ -256,7 +284,7 @@ mod tests {
 
     #[test]
     fn test_generate_text_response_usage() {
-        let options = LanguageModelOptions {
+        let request = LanguageModelRequest::<MockLanguageModel> {
             messages: vec![
                 TaggedMessage::new(0, Message::System("System".to_string().into())),
                 TaggedMessage::new(
@@ -288,7 +316,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let response = GenerateTextResponse { options };
+        let response = GenerateTextResponse::<MockLanguageModel> { request };
 
         let total_usage = response.usage();
         assert_eq!(total_usage.input_tokens, Some(15));
@@ -322,12 +350,14 @@ mod tests {
         )
     }
 
-    fn create_response_with_messages(messages: Vec<TaggedMessage>) -> GenerateTextResponse {
-        let options = LanguageModelOptions {
+    fn create_response_with_messages(
+        messages: Vec<TaggedMessage>,
+    ) -> GenerateTextResponse<MockLanguageModel> {
+        let request = LanguageModelRequest::<MockLanguageModel> {
             messages,
             ..Default::default()
         };
-        GenerateTextResponse { options }
+        GenerateTextResponse::<MockLanguageModel> { request }
     }
 
     // Tests for GenerateTextResponse tool_calls()

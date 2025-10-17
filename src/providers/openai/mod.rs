@@ -11,12 +11,16 @@ use async_openai::types::responses::{
 };
 use async_openai::{Client, config::OpenAIConfig};
 use futures::{StreamExt, stream::once};
+use schemars::{JsonSchema, Schema, schema_for};
 
+use crate::core::LanguageModelRequest;
+use crate::core::language_model::request::{LanguageModelRequestBuilder, OptionsStage};
 use crate::core::language_model::{
-    LanguageModelOptions, LanguageModelResponse, LanguageModelResponseContentType,
-    LanguageModelStreamChunk, LanguageModelStreamChunkType, ProviderStream,
+    LanguageModelResponse, LanguageModelResponseContentType, LanguageModelStreamChunk,
+    LanguageModelStreamChunkType, ProviderStream, ReasoningEffort,
 };
 use crate::core::messages::AssistantMessage;
+use crate::core::utils::resolve_message;
 use crate::error::ProviderError;
 use crate::providers::openai::settings::{OpenAIProviderSettings, OpenAIProviderSettingsBuilder};
 use crate::{
@@ -24,12 +28,14 @@ use crate::{
     error::{Error, Result},
 };
 use async_trait::async_trait;
+use derive_builder::Builder;
 
 /// The OpenAI provider.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct OpenAI {
     client: Client<OpenAIConfig>,
     settings: OpenAIProviderSettings,
+    options: LanguageModelOptions,
 }
 
 impl OpenAI {
@@ -47,21 +53,114 @@ impl OpenAI {
     }
 }
 
+// TODO: implmeent setters and getters for this struct to be exposed to the user
+#[derive(Default, Clone, Debug, Builder)]
+pub struct LanguageModelOptions {
+    /// Output format schema.
+    pub schema: Option<Schema>,
+
+    /// Randomness.
+    pub temperature: Option<f32>,
+
+    /// Nucleus sampling.
+    pub top_p: Option<f32>,
+
+    /// Top-k sampling.
+    pub top_k: Option<f32>,
+
+    /// Maxoutput tokens.
+    pub max_output_tokens: Option<u32>,
+
+    /// Stop sequences.
+    /// If set, the model will stop generating text when one of the stop sequences is generated.
+    pub stop_sequences: Option<Vec<String>>,
+
+    /// Presence penalty setting. It affects the likelihood of the model to
+    /// repeat information that is already in the prompt.
+    pub presence_penalty: Option<f32>,
+
+    /// Frequency penalty setting. It affects the likelihood of the model
+    /// to repeatedly use the same words or phrases.
+    pub frequency_penalty: Option<f32>,
+
+    /// Reasoning
+    pub reasoning_effort: Option<ReasoningEffort>,
+}
+
+impl LanguageModelRequestBuilder<OpenAI, OptionsStage> {
+    pub fn schema<T: JsonSchema>(
+        &mut self,
+    ) -> &mut LanguageModelRequestBuilder<OpenAI, OptionsStage> {
+        self.options.schema = Some(schema_for!(T));
+        self
+    }
+
+    pub fn temperature(
+        &mut self,
+        temperature: f32,
+    ) -> &mut LanguageModelRequestBuilder<OpenAI, OptionsStage> {
+        self.options.temperature = Some(temperature);
+        self
+    }
+
+    pub fn reasoning_effort(
+        &mut self,
+        reasoning_effort: impl Into<ReasoningEffort>,
+    ) -> &mut LanguageModelRequestBuilder<OpenAI, OptionsStage> {
+        self.options.reasoning_effort = Some(reasoning_effort.into());
+        self
+    }
+
+    pub fn build(&self) -> LanguageModelRequest<OpenAI> {
+        let model = self
+            .model
+            .clone()
+            .unwrap_or_else(|| unreachable!("can not reach here before ModelStage"));
+        let mut request = LanguageModelRequest {
+            model,
+            prompt: self.prompt.clone(),
+            system: self.system.clone(),
+            options: self.options.clone(),
+            stop_when: self.stop_when.clone(),
+            prepare_step: self.prepare_step.clone(),
+            on_step_finish: self.on_step_finish.clone(),
+            tools: self.tools.clone(),
+            current_step_id: 0,
+            messages: self.messages.clone(),
+            stop_reason: None,
+        };
+        let (system_prompt, messages) = resolve_message(&request);
+        request.system = Some(system_prompt);
+        request.messages = messages;
+        request
+    }
+}
+
 impl Provider for OpenAI {}
 
 impl ProviderError for OpenAIError {}
 
 #[async_trait]
 impl LanguageModel for OpenAI {
+    type Options = LanguageModelOptions;
+
+    fn options(&self) -> &Self::Options {
+        &self.options
+    }
+
+    fn options_mut(&mut self) -> &mut Self::Options {
+        &mut self.options
+    }
+
     fn name(&self) -> String {
         self.settings.model_name.clone()
     }
 
     async fn generate_text(
         &mut self,
-        options: LanguageModelOptions,
+        request: LanguageModelRequest<OpenAI>,
     ) -> Result<LanguageModelResponse> {
-        let mut request: CreateResponse = options.clone().into();
+        let mut request: CreateResponse = request.clone().into();
 
         request.model = self.settings.model_name.to_string();
 
@@ -100,7 +199,10 @@ impl LanguageModel for OpenAI {
         })
     }
 
-    async fn stream_text(&mut self, options: LanguageModelOptions) -> Result<ProviderStream> {
+    async fn stream_text(
+        &mut self,
+        options: LanguageModelRequest<OpenAI>,
+    ) -> Result<ProviderStream> {
         let mut request: CreateResponse = options.into();
         request.model = self.settings.model_name.to_string();
         request.stream = Some(true);

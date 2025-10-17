@@ -1,0 +1,24 @@
+# O1 Mini model configuration
+# References options from options.toml
+
+[model]
+name = "o1-mini"
+display_name = "O1 Mini"
+provider = "openai"
+capabilities = ["text", "reasoning"]
+
+# List of supported options (references keys from options.toml)
+supported_options = [
+    "max_output_tokens",
+    "max_retries",
+    "stop_sequences",
+    "reasoning_effort"
+]
+
+# Model-specific overrides for options
+[option_overrides.max_output_tokens]
+max = 65536
+default = 4096
+
+[option_overrides.reasoning_effort]
+default = "high"

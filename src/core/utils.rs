@@ -1,4 +1,6 @@
-use crate::core::{Message, language_model::LanguageModelOptions, messages::TaggedMessage};
+use crate::core::{
+    LanguageModelRequest, Message, language_model::LanguageModel, messages::TaggedMessage,
+};
 
 /// Resolves the message to be used for text generation.
 ///
@@ -6,23 +8,22 @@ use crate::core::{Message, language_model::LanguageModelOptions, messages::Tagge
 /// messages that can be used for LanguageModelCallOptions.
 /// if no messages are provided, a default message is created with the prompt and system prompt.
 pub(crate) fn resolve_message(
-    options: &LanguageModelOptions,
-    prompt: &Option<String>,
+    request: &LanguageModelRequest<impl LanguageModel>,
 ) -> (String, Vec<TaggedMessage>) {
-    let messages = if options.messages.is_empty() {
+    let messages = if request.messages.is_empty() {
         vec![
             TaggedMessage::initial_step_msg(Message::System(
-                options.system.to_owned().unwrap_or_default().into(),
+                request.system.to_owned().unwrap_or_default().into(),
             )),
             TaggedMessage::initial_step_msg(Message::User(
-                prompt.to_owned().unwrap_or_default().into(),
+                request.prompt.to_owned().unwrap_or_default().into(),
             )),
         ]
     } else {
-        options.messages.to_vec()
+        request.messages.to_vec()
     };
 
-    let system = options.system.to_owned().unwrap_or_else(|| {
+    let system = request.system.to_owned().unwrap_or_else(|| {
         messages
             .iter()
             .find_map(|m| match m.message {

@@ -15,7 +15,7 @@ use syn::{
 ///
 /// # Example
 ///
-/// ```rust
+/// ```
 /// #[tool]
 /// /// Returns the username
 /// fn get_username(id: String) {
@@ -36,7 +36,7 @@ use syn::{
 /// You can override name and description using the macro arguments `name` and `desc`.
 ///
 /// # Example with overrides
-/// ```rust
+/// ```
 ///     #[tool(
 ///         name = "the-name-for-this-tool",
 ///         desc = "the-description-for-this-tool"

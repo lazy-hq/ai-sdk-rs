@@ -5,7 +5,7 @@ use async_openai::{Client, config::OpenAIConfig};
 use crate::{error::Error, providers::openai::OpenAI};
 
 /// Settings for the OpenAI provider.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct OpenAIProviderSettings {
     /// The API base URL for the OpenAI API.
     pub base_url: String,
@@ -64,7 +64,11 @@ impl OpenAIProviderSettingsBuilder {
                 .with_api_key(settings.api_key.to_string()),
         );
 
-        Ok(OpenAI { settings, client })
+        Ok(OpenAI {
+            settings,
+            client,
+            options: Default::default(),
+        })
     }
 }
 

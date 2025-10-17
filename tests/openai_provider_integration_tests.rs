@@ -309,13 +309,14 @@ async fn test_generate_text_with_output_schema() {
 
     let result = LanguageModelRequest::builder()
         .model(OpenAI::new("gpt-4o"))
-        .prompt("generate user with dummy data, and and name of 'John Doe'")
+        .prompt("generate user with dummy data, and name of 'John Doe'")
         .schema::<User>()
         .build()
         .generate_text()
         .await
         .unwrap();
 
+    println!("result.text()): {:?}", result.text());
     let user: User = result.into_schema().unwrap();
 
     assert_eq!(user.name, "John Doe");
@@ -541,6 +542,7 @@ async fn test_prepare_step_executes_before_each_step() {
         .prepare_step(move |_| {
             let mut c = counter_clone.lock().unwrap();
             *c += 1;
+            None
         })
         .build()
         .generate_text()
@@ -572,9 +574,10 @@ async fn test_on_step_finish_executes_after_each_step() {
         .system("Call the tool. Return the neighborhood. Nothing more and nothing less")
         .prompt("What is the neighborhood?")
         .with_tool(get_neighborhood())
-        .on_step_finish(move |_| {
+        .on_step_finish(move |req| {
             let mut c = counter_clone.lock().unwrap();
             *c += 1;
+            Some(req)
         })
         .build()
         .generate_text()
@@ -606,11 +609,13 @@ async fn test_hooks_run_in_correct_order() {
         .system("Call the tool. Return the neighborhood. Nothing more and nothing less")
         .prompt("What is the neighborhood?")
         .with_tool(get_neighbourhood())
-        .prepare_step(move |_| {
+        .prepare_step(move |req| {
             log_prepare.lock().unwrap().push("prepare");
+            Some(req)
         })
         .on_step_finish(move |_| {
             log_finish.lock().unwrap().push("finish");
+            None
         })
         .build()
         .generate_text()
@@ -750,8 +755,10 @@ async fn test_hooks_persist_across_multiple_steps() {
         .with_tool(get_neighbourhood())
         .with_tool(get_neighbourhood_2())
         .on_step_finish(move |_| {
+            println!("on_step_finish");
             let mut c = counter_clone.lock().unwrap();
             *c += 1;
+            None
         })
         .build()
         .generate_text()
@@ -759,7 +766,8 @@ async fn test_hooks_persist_across_multiple_steps() {
         .unwrap();
 
     let count = *counter.lock().unwrap();
-    assert!(count >= 3); // Multiple steps
+    println!("count: {}", count);
+    assert!(count == 3); // Multiple steps
 }
 
 #[tokio::test]
@@ -777,6 +785,7 @@ async fn test_hooks_cloned_via_arc() {
         .prompt("Say hello")
         .on_step_finish(move |_| {
             *called_clone.lock().unwrap() = true;
+            None
         })
         .build()
         .generate_text()
@@ -813,8 +822,9 @@ async fn test_prepare_step_mutates_options() {
     let result = LanguageModelRequest::builder()
         .model(OpenAI::new("gpt-4o"))
         .prompt("Say hello")
-        .prepare_step(|opts| {
-            opts.temperature = Some(0); // Mutate
+        .prepare_step(|mut req| {
+            req.temperature = Some(0 as f32); // Mutate
+            Some(req)
         })
         .build()
         .generate_text()
@@ -845,7 +855,7 @@ async fn test_hook_isolation() {
     let result_with_hooks = LanguageModelRequest::builder()
         .model(OpenAI::new("gpt-4o"))
         .prompt("Say hello")
-        .on_step_finish(|_| {})
+        .on_step_finish(|_| None)
         .build()
         .generate_text()
         .await
@@ -879,8 +889,8 @@ async fn test_on_step_finish_for_text_reasoning_and_tool_call() {
         .system("Call the tool. to find the username. and return only the username nothing more and nothing less")
         .prompt("What is the username")
         .with_tool(get_username())
-        .on_step_finish(move |opts| {
-            if let Some(Message::Assistant(assistant_msg)) = opts.messages().last() {
+        .on_step_finish(move |req| {
+            if let Some(Message::Assistant(assistant_msg)) = req.messages().last() {
                 match &assistant_msg.content {
                     LanguageModelResponseContentType::ToolCall(_) => {
                         *tool_clone.lock().unwrap() = true;
@@ -891,9 +901,11 @@ async fn test_on_step_finish_for_text_reasoning_and_tool_call() {
                     LanguageModelResponseContentType::Reasoning(_) => {
                         *text_clone.lock().unwrap() = true;
                     }
-                    _ => {}
+                    _ => ()
                 }
-            }
+            };
+
+            None
         })
         .build()
         .generate_text()
@@ -920,6 +932,7 @@ async fn test_streaming_prepare_step_before_start() {
         .prompt("Say hello")
         .prepare_step(move |_| {
             *called_clone.lock().unwrap() = true;
+            None
         })
         .build()
         .stream_text()
@@ -944,6 +957,7 @@ async fn test_streaming_on_step_finish_at_end() {
         .prompt("Say hello")
         .on_step_finish(move |_| {
             *called_clone.lock().unwrap() = true;
+            None
         })
         .build()
         .stream_text()
@@ -974,92 +988,95 @@ async fn test_reasoning_effort_with_non_reasoning_model() {
         .unwrap();
 }
 
-#[tokio::test]
-async fn test_reasoning_tokens_in_response_usage() {
-    dotenv().ok();
-    if std::env::var("OPENAI_API_KEY").is_err() {
-        return;
-    }
+// TODO: reasoning.summary is not supported by openai requesting some
+// kind of verification from the user
+// #[tokio::test]
+// async fn test_reasoning_tokens_in_response_usage() {
+//     dotenv().ok();
+//     if std::env::var("OPENAI_API_KEY").is_err() {
+//         return;
+//     }
+//
+//     let result = LanguageModelRequest::builder()
+//         .model(OpenAI::new("o3-mini"))
+//         .prompt("Solve this math problem step by step: What is 15 * 7?")
+//         .reasoning_effort(aisdk::core::language_model::ReasoningEffort::High)
+//         .build()
+//         .generate_text()
+//         .await
+//         .unwrap();
+//
+//     assert!(result.text().is_some());
+//
+//     // Check that reasoning_tokens are present in usage
+//     let usage = result.usage();
+//     assert!(usage.reasoning_tokens.is_some());
+//     assert!(usage.reasoning_tokens.unwrap() > 0);
+// }
 
-    let result = LanguageModelRequest::builder()
-        .model(OpenAI::new("o1-mini"))
-        .prompt("Solve this math problem step by step: What is 15 * 7?")
-        .reasoning_effort(aisdk::core::language_model::ReasoningEffort::High)
-        .build()
-        .generate_text()
-        .await
-        .unwrap();
+// #[tokio::test]
+// async fn test_reasoning_content_type_handling() {
+//     dotenv().ok();
+//     if std::env::var("OPENAI_API_KEY").is_err() {
+//         return;
+//     }
+//
+//     let reasoning_called = Arc::new(Mutex::new(false));
+//     let text_called = Arc::new(Mutex::new(false));
+//     let reasoning_clone = Arc::clone(&reasoning_called);
+//     let text_clone = Arc::clone(&text_called);
+//
+//     let result = LanguageModelRequest::builder()
+//         .model(OpenAI::new("o3-mini"))
+//         .prompt("Explain your reasoning step by step: What is 2 + 3?")
+//         .reasoning_effort(aisdk::core::language_model::ReasoningEffort::High)
+//         .on_step_finish(move |req| {
+//             if let Some(Message::Assistant(assistant_msg)) = req.messages().last() {
+//                 match &assistant_msg.content {
+//                     LanguageModelResponseContentType::Text(_) => {
+//                         *text_clone.lock().unwrap() = true;
+//                     }
+//                     LanguageModelResponseContentType::Reasoning(_) => {
+//                         *reasoning_clone.lock().unwrap() = true;
+//                     }
+//                     _ => {}
+//                 }
+//             };
+//             None
+//         })
+//         .build()
+//         .generate_text()
+//         .await
+//         .unwrap();
+//
+//     assert!(result.text().is_some());
+//     // At least one of text or reasoning should be called
+//     assert!(*text_called.lock().unwrap() || *reasoning_called.lock().unwrap());
+// }
 
-    assert!(result.text().is_some());
-
-    // Check that reasoning_tokens are present in usage
-    let usage = result.usage();
-    assert!(usage.reasoning_tokens.is_some());
-    assert!(usage.reasoning_tokens.unwrap() > 0);
-}
-
-#[tokio::test]
-async fn test_reasoning_content_type_handling() {
-    dotenv().ok();
-    if std::env::var("OPENAI_API_KEY").is_err() {
-        return;
-    }
-
-    let reasoning_called = Arc::new(Mutex::new(false));
-    let text_called = Arc::new(Mutex::new(false));
-    let reasoning_clone = Arc::clone(&reasoning_called);
-    let text_clone = Arc::clone(&text_called);
-
-    let result = LanguageModelRequest::builder()
-        .model(OpenAI::new("o1-mini"))
-        .prompt("Explain your reasoning step by step: What is 2 + 3?")
-        .reasoning_effort(aisdk::core::language_model::ReasoningEffort::High)
-        .on_step_finish(move |opts| {
-            if let Some(Message::Assistant(assistant_msg)) = opts.messages().last() {
-                match &assistant_msg.content {
-                    LanguageModelResponseContentType::Text(_) => {
-                        *text_clone.lock().unwrap() = true;
-                    }
-                    LanguageModelResponseContentType::Reasoning(_) => {
-                        *reasoning_clone.lock().unwrap() = true;
-                    }
-                    _ => {}
-                }
-            }
-        })
-        .build()
-        .generate_text()
-        .await
-        .unwrap();
-
-    assert!(result.text().is_some());
-    // At least one of text or reasoning should be called
-    assert!(*text_called.lock().unwrap() || *reasoning_called.lock().unwrap());
-}
-
-#[tokio::test]
-async fn test_streaming_with_reasoning_effort() {
-    dotenv().ok();
-    if std::env::var("OPENAI_API_KEY").is_err() {
-        return;
-    }
-
-    let response = LanguageModelRequest::builder()
-        .model(OpenAI::new("o1-mini"))
-        .prompt("Count from 1 to 5 step by step")
-        .reasoning_effort(aisdk::core::language_model::ReasoningEffort::Medium)
-        .build()
-        .stream_text()
-        .await
-        .unwrap();
-
-    let mut stream = response.stream;
-    let mut chunks_received = 0;
-    while let Some(chunk) = stream.next().await {
-        chunks_received += 1;
-        // Just verify we get chunks
-        let _ = chunk;
-    }
-
-    assert!(chunks_received > 0);
-}
+// #[tokio::test]
+// async fn test_streaming_with_reasoning_effort() {
+//     dotenv().ok();
+//     if std::env::var("OPENAI_API_KEY").is_err() {
+//         return;
+//     }
+//
+//     let response = LanguageModelRequest::builder()
+//         .model(OpenAI::new("o3-mini"))
+//         .prompt("Count from 1 to 5 step by step")
+//         .reasoning_effort(aisdk::core::language_model::ReasoningEffort::Medium)
+//         .build()
+//         .stream_text()
+//         .await
+//         .unwrap();
+//
+//     let mut stream = response.stream;
+//     let mut chunks_received = 0;
+//     while let Some(chunk) = stream.next().await {
+//         chunks_received += 1;
+//         // Just verify we get chunks
+//         let _ = chunk;
+//     }
+//
+//     assert!(chunks_received > 0);
+// }

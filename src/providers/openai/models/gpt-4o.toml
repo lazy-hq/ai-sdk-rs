@@ -1,0 +1,28 @@
+# GPT-4o model configuration
+# References options from options.toml
+
+[model]
+name = "gpt-4o"
+display_name = "GPT-4o"
+capabilities = ["text", "vision", "reasoning", "schema"]
+
+# List of supported options (references keys from options.toml)
+supported_options = [
+    "temperature",
+    "max_output_tokens",
+    "top_p",
+    "frequency_penalty",
+    "presence_penalty",
+    "max_retries",
+    "stop_sequences",
+    "seed",
+    "reasoning_effort"
+]
+
+# Model-specific overrides for options
+[option_overrides.max_output_tokens]
+max = 4096
+default = 2048
+
+[option_overrides.temperature]
+default = 0.7
